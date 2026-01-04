@@ -62,17 +62,9 @@ export default function LoginPage() {
             {isLogin ? '登录到 NewRAG' : '注册 NewRAG 账户'}
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
-            {isLogin ? '默认管理员账户' : '创建新账户'}
+            {isLogin ? '请输入您的凭据以登录' : '创建新账户'}
           </p>
-          {isLogin && (
-            <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <p className="text-sm text-blue-800">
-                <strong>默认管理员账户：</strong><br />
-                用户名: <code className="bg-blue-100 px-2 py-1 rounded">admin</code><br />
-                密码: <code className="bg-blue-100 px-2 py-1 rounded">Admin123!@#</code>
-              </p>
-            </div>
-          )}
+
         </div>
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           {error && (

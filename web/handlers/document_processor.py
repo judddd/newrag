@@ -304,7 +304,7 @@ def process_single_pdf(doc_id: int, pdf_path: Path, metadata: dict, ocr_engine: 
             '--ocr-engine', ocr_engine,
             '--output-dir', str(doc_output_dir),
             '--processing-mode', processing_mode
-        ], check=True)
+        ], check=True, timeout=1200)
         
         # Check for cancellation after OCR
         if not task_manager.wait_if_paused(doc_id):
@@ -512,7 +512,7 @@ def process_single_pptx(doc_id: int, file_path: Path, metadata: dict, ocr_engine
             str(file_path),
             '-o', str(doc_output_dir),
             '--ocr-engine', ocr_engine
-        ], capture_output=True, text=True)
+        ], capture_output=True, text=True, timeout=1200)
         
         if result.returncode != 0:
             logger.error("pptx_processing_failed", error=result.stderr, doc_id=doc_id)
@@ -700,7 +700,7 @@ def process_single_docx(doc_id: int, file_path: Path, metadata: dict, ocr_engine
             str(file_path),
             '-o', str(doc_output_dir),
             '--ocr-engine', ocr_engine
-        ], capture_output=True, text=True)
+        ], capture_output=True, text=True, timeout=1200)
         
         if result.returncode != 0:
             logger.error("docx_processing_failed", error=result.stderr, stdout=result.stdout, doc_id=doc_id)
@@ -818,7 +818,7 @@ def process_single_excel(doc_id: int, file_path: Path, metadata: dict, ocr_engin
             str(excel_script),
             str(file_path),
             '-o', str(doc_output_dir)
-        ], capture_output=True, text=True)
+        ], capture_output=True, text=True, timeout=1200)
         
         if result.returncode != 0:
             logger.error("excel_processing_failed", error=result.stderr, doc_id=doc_id)
@@ -946,7 +946,7 @@ def process_single_image(doc_id: int, file_path: Path, metadata: dict, ocr_engin
         ]
         logger.info("📝 process_command", doc_id=doc_id, cmd=' '.join(cmd))
         
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=1200)
         logger.info("✅ image_processing_stdout", doc_id=doc_id, stdout=result.stdout[:500] if result.stdout else "")
         if result.stderr:
             logger.warning("⚠️ image_processing_stderr", doc_id=doc_id, stderr=result.stderr[:500])
@@ -1307,6 +1307,12 @@ def _real_process_document(doc_id: int, file_path: Path, metadata: dict, ocr_eng
         task_manager.complete_task(doc_id, success=False, error_message="Task cancelled by user")
         db.update_document_status(doc_id, 'cancelled', error_message=str(e))
     
+    except subprocess.TimeoutExpired as e:
+        error_msg = f"Processing timed out after {e.timeout}s: {str(e)}"
+        logger.error("❌ subprocess_timeout", error=str(e), doc_id=doc_id)
+        task_manager.complete_task(doc_id, success=False, error_message=error_msg)
+        db.update_document_status(doc_id, 'failed', error_message=error_msg)
+
     except subprocess.CalledProcessError as e:
         error_msg = f"OCR processing failed: {str(e)}"
         logger.error("❌ subprocess_failed", error=str(e), returncode=e.returncode, 
