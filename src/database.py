@@ -504,7 +504,7 @@ class DatabaseManager:
                 return query.filter(model_class.org_id == org_id)
             else:
                 # Superuser without org filter: sees everything
-            return query
+                return query
         
         if user_id is None:
             # Anonymous users only see public documents
@@ -661,21 +661,21 @@ class DatabaseManager:
                     session.commit()
                 else:
                     # Fallback to legacy Document table
-                doc = session.query(Document).filter(Document.id == doc_id).first()
-                if doc:
-                    doc.status = status
-                    if num_chunks is not None:
-                        doc.num_chunks = num_chunks
-                    if es_document_ids:
-                        doc.es_document_ids = es_document_ids
-                    if error_message:
-                        doc.error_message = error_message
-                    if pages_data:
-                        doc.pages_data = pages_data
-                    if status == 'completed':
-                        doc.processed_at = datetime.utcnow()
-                        doc.progress_percentage = 100
-                    session.commit()
+                    doc = session.query(Document).filter(Document.id == doc_id).first()
+                    if doc:
+                        doc.status = status
+                        if num_chunks is not None:
+                            doc.num_chunks = num_chunks
+                        if es_document_ids:
+                            doc.es_document_ids = es_document_ids
+                        if error_message:
+                            doc.error_message = error_message
+                        if pages_data:
+                            doc.pages_data = pages_data
+                        if status == 'completed':
+                            doc.processed_at = datetime.utcnow()
+                            doc.progress_percentage = 100
+                        session.commit()
             finally:
                 session.close()
     
@@ -703,15 +703,15 @@ class DatabaseManager:
                     session.commit()
                 else:
                     # Fallback to legacy Document table
-                doc = session.query(Document).filter(Document.id == doc_id).first()
-                if doc:
-                    doc.progress_percentage = min(100, max(0, progress_percentage))
-                    doc.progress_message = progress_message
-                    if processed_pages is not None:
-                        doc.processed_pages = processed_pages
-                    if total_pages is not None:
-                        doc.total_pages = total_pages
-                    session.commit()
+                    doc = session.query(Document).filter(Document.id == doc_id).first()
+                    if doc:
+                        doc.progress_percentage = min(100, max(0, progress_percentage))
+                        doc.progress_message = progress_message
+                        if processed_pages is not None:
+                            doc.processed_pages = processed_pages
+                        if total_pages is not None:
+                            doc.total_pages = total_pages
+                        session.commit()
             finally:
                 session.close()
     
@@ -729,11 +729,11 @@ class DatabaseManager:
                     session.commit()
                 else:
                     # Fallback to legacy Document table
-                doc = session.query(Document).filter(Document.id == doc_id).first()
-                if doc:
-                    doc.pages_data = json.dumps(pages_data)
+                    doc = session.query(Document).filter(Document.id == doc_id).first()
+                    if doc:
+                        doc.pages_data = json.dumps(pages_data)
                         doc.total_pages = len(pages_data)
-                    session.commit()
+                        session.commit()
             finally:
                 session.close()
     

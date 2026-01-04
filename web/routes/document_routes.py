@@ -11,7 +11,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, File, Form, UploadFile, Depends, Request
 from fastapi.responses import JSONResponse
 from src.task_manager import task_manager, TaskStatus
-from src.database import DatabaseManager, User, AuthManager
+from src.database import DatabaseManager, User
 import shutil
 from src.pipeline import ProcessingPipeline
 from src.config import config
@@ -41,14 +41,12 @@ async def list_documents(
     limit: int = 50, 
     offset: int = 0, 
     status: Optional[str] = None, 
-    organization_id: Optional[int] = None,
     include_archives: bool = False,
     current_user: Optional[User] = Depends(get_current_user)
 ):
     """
     List uploaded documents with permission filtering
     
-    Supports version control: returns latest version of each document master.
     Requires authentication. Returns only documents the user has permission to see.
     """
     try:
@@ -57,45 +55,8 @@ async def list_documents(
         
         # Apply permission filtering based on current user
         user_id = current_user.id if current_user else None
+        org_id = current_user.org_id if current_user else None
         is_superuser = current_user.is_superuser if current_user else False
-        
-        # Determine target organization ID for filtering
-        target_org_id = None
-        
-        if current_user:
-            if is_superuser:
-                # Superuser can filter by specific org, or see all (if organization_id is None)
-                target_org_id = organization_id
-            else:
-                # Regular users can only see their own organization
-                target_org_id = current_user.org_id
-        
-        # Try version control method first
-        try:
-            docs_combined = db.list_document_masters(
-                org_id=target_org_id,
-                user_id=user_id,
-                limit=limit,
-                offset=offset,
-                status=status,
-                is_superuser=is_superuser
-            )
-            
-            # Filter by file type if needed
-            if exclude_types:
-                docs_combined = [
-                    doc for doc in docs_combined 
-                    if doc.get('file_type') not in exclude_types
-                ]
-            
-            return JSONResponse(content={
-                "documents": docs_combined,
-                "total": len(docs_combined)
-            })
-        except Exception as version_err:
-            # Fallback to old method for backward compatibility
-            logger.warning("version_control_list_failed_fallback_to_legacy", 
-                         error=str(version_err), user_id=user_id)
         
         docs = db.list_documents(
             limit=limit, 
@@ -103,7 +64,7 @@ async def list_documents(
             status=status, 
             exclude_file_types=exclude_types,
             user_id=user_id,
-                org_id=target_org_id,
+            org_id=org_id,
             is_superuser=is_superuser
         )
         return JSONResponse(content={
@@ -343,61 +304,30 @@ async def delete_document(
     try:
         logger.info(f"Attempting to delete document {doc_id}", user_id=current_user.id)
         
-        # 1. Try to find in DB - check both old Document and new DocumentVersion
+        # 1. Try to find in DB first (bypass permission filter to get the actual document)
+        # We'll check permissions separately
         session = db.get_session()
-        doc = None
-        doc_version = None
-        doc_master = None
-        
         try:
-            from src.database import Document, DocumentVersion, DocumentMaster
-            
-            # First try new version control tables
-            doc_version = session.query(DocumentVersion).filter(DocumentVersion.id == doc_id).first()
-            if doc_version:
-                doc_master = session.query(DocumentMaster).filter(
-                    DocumentMaster.id == doc_version.document_master_id
-                ).first()
-            
-            # If not found, try old Document table (for backward compatibility)
-            if not doc_version:
+            from src.database import Document
             doc = session.query(Document).filter(Document.id == doc_id).first()
         finally:
             session.close()
         
-        # Check permissions
-        if not current_user.is_superuser:
-            if doc_master:
-                # New version control: check master's owner
-                if doc_master.owner_id and doc_master.owner_id != current_user.id:
-                    raise HTTPException(
-                        status_code=403,
-                        detail="You can only delete your own documents"
-                    )
-            elif doc:
-                # Old document: check doc's owner
+        # Check permissions - users can only delete their own documents unless superuser
+        if doc and not current_user.is_superuser:
+            # Allow deletion of legacy documents (no owner_id) OR owned documents
             if doc.owner_id is not None and doc.owner_id != current_user.id:
                 raise HTTPException(
                     status_code=403,
                     detail="You can only delete your own documents"
                 )
         
-        # Extract info for deletion
-        if doc_version and doc_master:
-            # New version control - delete entire document master and all versions
-            checksum = doc_version.checksum
-            filename = doc_master.filename_base
-            file_path = doc_version.file_path
-        elif doc:
-            # Old document
-            checksum = doc.checksum
-            filename = doc.filename
-            file_path = doc.file_path
-        else:
-            # Not found - still try to clean up by ID
-            checksum = None
-            filename = None
-            file_path = None
+        # If not found in DB, we might still need to clean up ES and other storages
+        # But if found, we use its info
+        
+        checksum = doc.checksum if doc else None
+        filename = doc.filename if doc else None
+        file_path = doc.file_path if doc else None
         
         deletion_result = {
             "doc_id": doc_id,
@@ -409,8 +339,9 @@ async def delete_document(
             "child_docs_deleted": 0
         }
         
+        # If found in DB, cancel tasks and handle children
+        if doc:
             # Cancel any running task for this document
-        if doc or doc_version:
             task_manager.cancel_task(doc_id)
         
         # 1.5. If this is a ZIP parent, collect child task IDs and delete them first
@@ -480,23 +411,10 @@ async def delete_document(
             except Exception as child_error:
                 logger.error("child_deletion_failed", error=str(child_error), child_id=child_id)
         
-        # 2. Delete from Elasticsearch
+        # 2. Delete parent document from Elasticsearch by document_id
+        # Even if doc is not in DB, we try to delete from ES using the ID provided
         try:
-            if doc_master:
-                # Delete all versions from ES
-                all_versions = db.get_version_history(doc_master.id)
-                for v in all_versions:
-                    try:
-                        es_deleted = pipeline.vector_store.delete_by_metadata(
-                            {"document_id": str(v.id)}
-                        )
-                        deletion_result["es_deleted"] += es_deleted
-                    except Exception as e:
-                        logger.warning("version_es_deletion_failed", version_id=v.id, error=str(e))
-                logger.info("all_versions_es_deleted", master_id=doc_master.id, 
-                          total_deleted=deletion_result["es_deleted"])
-            else:
-                # Delete old document from ES
+            # Try primary deletion by document_id, fallback to checksum for legacy data
             es_deleted = pipeline.vector_store.delete_by_metadata(
                 {"document_id": str(doc_id)},
                 fallback_filters={"checksum": checksum} if checksum else None
@@ -509,20 +427,11 @@ async def delete_document(
         # 3. Delete from MinIO
         try:
             from src.minio_storage import minio_storage
-            if minio_storage.enabled:
-                if doc_master:
-                    # Delete all versions from MinIO
-                    all_versions = db.get_version_history(doc_master.id)
-                    filename_base = Path(doc_master.filename_base).stem.replace(' ', '_').replace('/', '_')
-                    for v in all_versions:
-                        if v.checksum:
-                            minio_prefix = f"{filename_base}_{v.id}_{v.checksum[:8]}"
-                            minio_deleted = minio_storage.delete_directory(minio_prefix)
-                            deletion_result["minio_deleted"] += minio_deleted
-                elif filename and checksum:
-                    # Delete old document from MinIO
+            if minio_storage.enabled and filename and checksum:
+                # 构建 MinIO prefix: {filename_base}_{doc_id}_{checksum[:8]}
                 filename_base = Path(filename).stem.replace(' ', '_').replace('/', '_')
                 minio_prefix = f"{filename_base}_{doc_id}_{checksum[:8]}"
+                
                 minio_deleted = minio_storage.delete_directory(minio_prefix)
                 deletion_result["minio_deleted"] = minio_deleted
                 logger.info("minio_deleted", doc_id=doc_id, prefix=minio_prefix, count=minio_deleted)
@@ -530,20 +439,9 @@ async def delete_document(
             logger.warning("minio_deletion_failed", error=str(minio_error), doc_id=doc_id)
         
         # 4. Delete local processed files
+        if checksum:
             try:
                 processed_folder = Path('web/static/processed_docs')
-            if doc_master:
-                # Delete all versions' local files
-                all_versions = db.get_version_history(doc_master.id)
-                for v in all_versions:
-                    if v.checksum:
-                        version_folder = processed_folder / f"{v.id}_{v.checksum[:8]}"
-                        if version_folder.exists():
-                            import shutil
-                            shutil.rmtree(version_folder)
-                            deletion_result["local_files_deleted"] = True
-            elif checksum:
-                # Delete old document's local files
                 doc_folder = processed_folder / f"{doc_id}_{checksum[:8]}"
                 if doc_folder.exists():
                     import shutil
@@ -553,17 +451,10 @@ async def delete_document(
             except Exception as local_error:
                 logger.warning("local_deletion_failed", error=str(local_error), doc_id=doc_id)
         
-        # 5. Delete original uploaded file(s)
-        try:
-            if doc_master:
-                # Delete all versions' original files
-                all_versions = db.get_version_history(doc_master.id)
-                for v in all_versions:
-                    if v.file_path and Path(v.file_path).exists():
-                        Path(v.file_path).unlink()
-                        deletion_result["original_file_deleted"] = True
-            elif file_path and Path(file_path).exists():
-                # Delete old document's original file
+        # 5. Delete original uploaded file
+        if file_path:
+            try:
+                if Path(file_path).exists():
                     Path(file_path).unlink()
                     deletion_result["original_file_deleted"] = True
                     logger.info("original_file_deleted", doc_id=doc_id, path=file_path)
@@ -571,17 +462,8 @@ async def delete_document(
                 logger.warning("original_file_deletion_failed", error=str(file_error), doc_id=doc_id)
         
         # 6. Delete from SQLite
-        if doc_master:
-            # Delete entire document master and all versions
-            success = db.delete_document_master(doc_master.id)
-            if not success:
-                logger.warning("db_delete_master_failed", master_id=doc_master.id)
-            else:
-                logger.info("document_master_and_versions_deleted", 
-                          master_id=doc_master.id, 
-                          group_id=doc_master.document_group_id)
-        elif doc:
-            # Delete old document
+        # Even if it wasn't found initially (race condition?), try delete one last time
+        if doc:
             success = db.delete_document(doc_id)
             if not success:
                 logger.warning("db_delete_failed_or_already_gone", doc_id=doc_id)
@@ -762,103 +644,42 @@ async def upload_file(
         with open(file_path, 'rb') as f:
             checksum = hashlib.sha256(f.read()).hexdigest()
         
-        # ===== Version Control Logic =====
-        # Check if a document with this filename already exists in the organization
-        existing_master = db.get_document_master_by_filename(
-            filename=file.filename,
-            org_id=organization_id
-        )
-        
-        is_new_version = False
-        version_number = 1
-        
-        if existing_master:
-            # Document with this filename exists
-            latest_version = db.get_latest_version(existing_master.id)
-            
-            if latest_version and checksum == latest_version.checksum:
-                # Exact same file content
+        # Check if already exists
+        existing = db.get_document_by_checksum(checksum)
+        if existing:
             if file_path.exists():
                 os.remove(file_path)
             return JSONResponse(content={
                 "status": "duplicate",
-                    "message": "文件内容完全相同",
-                    "version": latest_version.version,
-                    "document": latest_version.to_combined_dict(existing_master)
+                "message": "File already exists",
+                "document": existing.to_dict()
             })
         
-            # Different content - create new version
-            is_new_version = True
-            version_number = latest_version.version + 1 if latest_version else 1
-            
-            logger.info("creating_new_version", 
+        # Create database record with user and organization info
+        doc = db.create_document(
             filename=file.filename,
-                       version=version_number,
-                       master_id=existing_master.id)
-            
-            # Create new version
-            doc_version = db.create_document_version(
-                document_master_id=existing_master.id,
-                version=version_number,
             file_path=str(file_path),
             file_type=file_ext,
             file_size=file_size,
             checksum=checksum,
-                ocr_engine=ocr_engine,
-                uploaded_by_id=current_user.id,
-                version_note=f"Version {version_number}"
-            )
-            doc_id = doc_version.id
-            logger.info("new_version_created", 
-                       doc_id=doc_id, 
-                       version=version_number,
-                       master_id=existing_master.id)
-        else:
-            # New document - create master + version 1
-            logger.info("creating_new_document_master", filename=file.filename)
-            
-            # Create document master
-            master = db.create_document_master(
-                filename_base=file.filename,
-                owner_id=current_user.id,
-                org_id=organization_id,
-                visibility=visibility,
             category=category,
             tags=tags.split(',') if tags else None,
             author=author,
-                description=description
-            )
-            
-            logger.info("document_master_created", 
-                       master_id=master.id,
-                       document_group_id=master.document_group_id)
-            
-            # Create version 1
-            doc_version = db.create_document_version(
-                document_master_id=master.id,
-                version=1,
-                file_path=str(file_path),
-                file_type=file_ext,
-                file_size=file_size,
-                checksum=checksum,
+            description=description,
             ocr_engine=ocr_engine,
-                uploaded_by_id=current_user.id,
-                version_note="Initial version"
+            owner_id=current_user.id,
+            org_id=organization_id,
+            visibility=visibility
         )
-            doc_id = doc_version.id
-            existing_master = master
-            logger.info("initial_version_created", doc_id=doc_id)
+        doc_id = doc.id
+        logger.info("document_created", doc_id=doc_id, file_type=file_ext)
         
         # Update status to processing
-        db.update_document_version_status(doc_id, 'processing')
-        logger.info("status_updated_to_processing", doc_id=doc_id, version=version_number)
+        db.update_document_status(doc_id, 'processing')
+        logger.info("status_updated_to_processing", doc_id=doc_id)
         
-        # Prepare metadata (include permission fields for Elasticsearch)
-        metadata = {
-            'owner_id': current_user.id,
-            'org_id': organization_id,
-            'visibility': visibility
-        }
+        # Prepare metadata
+        metadata = {}
         if category:
             metadata['category'] = category
         if tags:
@@ -883,33 +704,20 @@ async def upload_file(
         thread.start()
         
         # Return immediately with task info
-        response_content = {
-            'status': 'new_version' if is_new_version else 'created',
-            'message': f'版本 {version_number} 已创建并开始处理' if is_new_version else 'Document uploaded and processing started',
+        return JSONResponse(content={
+            'status': 'processing',
+            'message': 'Document uploaded and processing started',
             'document_id': doc_id,
             'checksum': checksum,
-            'filename': file.filename,
-            'version': version_number
-        }
-        
-        if existing_master:
-            response_content['document_group_id'] = existing_master.document_group_id
-        
-        return JSONResponse(content=response_content)
+            'filename': file.filename
+        })
     
     except Exception as e:
         logger.error("upload_failed", error=str(e))
         
         # Update database if record was created
         if doc_id:
-            try:
-                db.update_document_version_status(doc_id, 'failed', error_message=str(e))
-            except:
-                # Fallback to old method for backward compatibility
-                try:
             db.update_document_status(doc_id, 'failed', error_message=str(e))
-                except:
-                    pass
         
         # Clean up file
         if file_path and file_path.exists():
@@ -1023,12 +831,8 @@ async def upload_batch(
                 # Update status to processing
                 db.update_document_status(doc.id, 'processing')
                 
-                # 6. Prepare Metadata (include permission fields for Elasticsearch)
-                metadata = {
-                    'owner_id': current_user.id,
-                    'org_id': organization_id,
-                    'visibility': visibility
-                }
+                # 6. Prepare Metadata
+                metadata = {}
                 if category: metadata['category'] = category
                 if tags: metadata['tags'] = tags.split(',')
                 if author: metadata['author'] = author
@@ -1095,12 +899,8 @@ async def upload_zip(
         
         logger.info("zip_uploaded", filename=file.filename)
         
-        # Prepare metadata (include permission fields for Elasticsearch)
-        metadata = {
-            'owner_id': current_user.id,
-            'org_id': organization_id,
-            'visibility': visibility
-        }
+        # Prepare metadata
+        metadata = {}
         if category:
             metadata['category'] = category
         if tags:
@@ -1145,502 +945,186 @@ async def upload_zip(
 # - update_document_permissions()
 
 
-# ===== Version Control API Endpoints =====
+# ============================================================
+# Document Permission Management
+# ============================================================
 
-@router.get("/documents/{group_id}/versions")
-async def get_version_history(
-    group_id: str,
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Get version history for a document by its group ID.
-    Returns all versions ordered by version number (newest first).
-    """
-    try:
-        # Get document master
-        master = db.get_document_master_by_group_id(group_id)
-        if not master:
-            raise HTTPException(status_code=404, detail="Document not found")
-        
-        # Check permissions (simplified - should use permission system)
-        if not current_user.is_superuser:
-            if master.owner_id != current_user.id and master.org_id != current_user.org_id:
-                raise HTTPException(status_code=403, detail="Access denied")
-        
-        # Get version history
-        versions = db.get_version_history(master.id)
-        
-        # Convert to dict with user info
-        version_list = []
-        for v in versions:
-            version_dict = v.to_dict()
-            
-            # Add uploader info
-            if v.uploaded_by_id:
-                uploader = auth_manager.get_user_by_id(v.uploaded_by_id)
-                if uploader:
-                    version_dict['uploaded_by'] = {
-                        'id': uploader.id,
-                        'username': uploader.username,
-                        'email': uploader.email
-                    }
-            
-            # Mark if this is the latest version
-            version_dict['is_latest'] = (master.latest_version_id == v.id)
-            
-            version_list.append(version_dict)
-        
-        return JSONResponse(content={
-            "document_group_id": group_id,
-            "filename": master.filename_base,
-            "versions": version_list,
-            "total_versions": len(version_list)
-        })
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("get_version_history_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+from pydantic import BaseModel
+from src.database import AuthManager
 
 
-@router.get("/documents/{group_id}/versions/{version_number}")
-async def get_specific_version(
-    group_id: str,
-    version_number: int,
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Get a specific version of a document.
-    """
-    try:
-        # Get document master
-        master = db.get_document_master_by_group_id(group_id)
-        if not master:
-            raise HTTPException(status_code=404, detail="Document not found")
-        
-        # Check permissions
-        if not current_user.is_superuser:
-            if master.owner_id != current_user.id and master.org_id != current_user.org_id:
-                raise HTTPException(status_code=403, detail="Access denied")
-        
-        # Get specific version
-        version = db.get_document_version_by_number(master.id, version_number)
-        if not version:
-            raise HTTPException(status_code=404, detail=f"Version {version_number} not found")
-        
-        # Return combined view
-        return JSONResponse(content=version.to_combined_dict(master))
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("get_specific_version_failed", 
-                    group_id=group_id, version=version_number, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/documents/{group_id}/versions/{version_number}/restore")
-async def restore_version(
-    group_id: str,
-    version_number: int,
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Restore a specific version by creating a new version that is a copy of it.
-    This makes the specified version the latest version.
-    """
-    try:
-        # Get document master
-        master = db.get_document_master_by_group_id(group_id)
-        if not master:
-            raise HTTPException(status_code=404, detail="Document not found")
-        
-        # Check permissions (only owner or superuser can restore)
-        if not current_user.is_superuser and master.owner_id != current_user.id:
-            raise HTTPException(
-                status_code=403, 
-                detail="Only document owner can restore versions"
-            )
-        
-        # Restore version
-        new_version = db.restore_version(master.id, version_number)
-        
-        logger.info("version_restored", 
-                   group_id=group_id, 
-                   restored_from=version_number,
-                   new_version=new_version.version,
-                   user_id=current_user.id)
-        
-        return JSONResponse(content={
-            "message": f"Version {version_number} restored successfully",
-            "new_version": new_version.version,
-            "document": new_version.to_combined_dict(master)
-        })
-        
-    except HTTPException:
-        raise
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.error("restore_version_failed", 
-                    group_id=group_id, version=version_number, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/documents/{group_id}/versions/{version_number}")
-async def delete_version(
-    group_id: str,
-    version_number: int,
-    hard_delete: bool = False,
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Delete a specific version (soft delete by default).
-    Cannot delete the only remaining version.
-    """
-    try:
-        # Get document master
-        master = db.get_document_master_by_group_id(group_id)
-        if not master:
-            raise HTTPException(status_code=404, detail="Document not found")
-        
-        # Check permissions
-        if not current_user.is_superuser and master.owner_id != current_user.id:
-            raise HTTPException(
-                status_code=403, 
-                detail="Only document owner can delete versions"
-            )
-        
-        # Get all versions
-        all_versions = db.get_version_history(master.id)
-        if len(all_versions) <= 1:
-            raise HTTPException(
-                status_code=400, 
-                detail="Cannot delete the only remaining version"
-            )
-        
-        # Get the version to delete
-        version = db.get_document_version_by_number(master.id, version_number)
-        if not version:
-            raise HTTPException(status_code=404, detail=f"Version {version_number} not found")
-        
-        # Delete version
-        success = db.delete_document_version(version.id, soft_delete=not hard_delete)
-        
-        if success:
-            logger.info("version_deleted", 
-                       group_id=group_id, 
-                       version=version_number,
-                       hard_delete=hard_delete,
-                       user_id=current_user.id)
-            
-            return JSONResponse(content={
-                "message": f"Version {version_number} deleted successfully",
-                "deleted_type": "hard" if hard_delete else "soft"
-            })
-        else:
-            raise HTTPException(status_code=500, detail="Failed to delete version")
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("delete_version_failed", 
-                    group_id=group_id, version=version_number, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.put("/documents/{group_id}/metadata")
-async def update_document_metadata(
-    group_id: str,
-    category: Optional[str] = None,
-    tags: Optional[str] = None,
-    author: Optional[str] = None,
-    description: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Update document master metadata (affects all versions).
-    """
-    try:
-        # Get document master
-        master = db.get_document_master_by_group_id(group_id)
-        if not master:
-            raise HTTPException(status_code=404, detail="Document not found")
-        
-        # Check permissions
-        if not current_user.is_superuser and master.owner_id != current_user.id:
-            raise HTTPException(
-                status_code=403, 
-                detail="Only document owner can update metadata"
-            )
-        
-        # Parse tags
-        tags_list = tags.split(',') if tags else None
-        
-        # Update metadata
-        updated_master = db.update_document_master_metadata(
-            document_master_id=master.id,
-            category=category,
-            tags=tags_list,
-            author=author,
-            description=description
-        )
-        
-        logger.info("document_metadata_updated", 
-                   group_id=group_id, 
-                   user_id=current_user.id)
-        
-        return JSONResponse(content={
-            "message": "Metadata updated successfully",
-            "document": updated_master.to_dict()
-        })
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("update_metadata_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+class DocumentPermissionRequest(BaseModel):
+    """Document permission update request"""
+    visibility: str  # "public" | "organization" | "private"
+    shared_with_users: Optional[List[int]] = []
+    shared_with_roles: Optional[List[str]] = []
 
 
 @router.get("/documents/{doc_id}/permissions")
 async def get_document_permissions(
     doc_id: int,
-    current_user: User = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_current_user)
 ):
     """
-    Get document permissions detail.
-    Supports both legacy Document and new DocumentMaster/Version.
-    """
-    import json
-    try:
-        # Try to get as DocumentMaster first
-        master = None
-        document = None
-        
-        with db._db_lock:
-            session = db.get_session()
-            try:
-                from src.database import DocumentMaster, DocumentVersion, Document
-                
-                # Check if it's a version ID (for backward compatibility)
-                version = session.query(DocumentVersion).filter(DocumentVersion.id == doc_id).first()
-                if version:
-                    master = session.query(DocumentMaster).filter(
-                        DocumentMaster.id == version.document_master_id
-                    ).first()
-                else:
-                    # Try as DocumentMaster ID
-                    master = session.query(DocumentMaster).filter(DocumentMaster.id == doc_id).first()
-                
-                # Fallback to legacy Document
-                if not master:
-                    document = session.query(Document).filter(Document.id == doc_id).first()
+    Get document permission details
     
-                if not master and not document:
-                    raise HTTPException(status_code=404, detail="Document not found")
-                
-                # Build response
-                if master:
-                    # Parse shared users/roles
-                    shared_users_ids = json.loads(master.shared_with_users) if master.shared_with_users else []
-                    shared_roles_codes = json.loads(master.shared_with_roles) if master.shared_with_roles else []
-                    
-                    # Get shared users details
-                    from src.database import User as DBUser
-                    shared_users = []
-                    if shared_users_ids:
-                        users = session.query(DBUser).filter(DBUser.id.in_(shared_users_ids)).all()
-                        shared_users = [
-                            {
-                                "id": u.id,
-                                "username": u.username,
-                                "email": u.email
-                            } for u in users
-                        ]
-                    
-                    # Get shared roles details
-                    from src.database import Role
-                    shared_roles = []
-                    if shared_roles_codes:
-                        roles = session.query(Role).filter(Role.code.in_(shared_roles_codes)).all()
-                        shared_roles = [
-                            {
-                                "code": r.code,
-                                "name": r.name
-                            } for r in roles
-                        ]
+    Returns document owner, visibility, and shared users/roles.
+    """
+    # Get document (with permission check)
+    doc = db.get_document(
+        doc_id,
+        user_id=current_user.id if current_user else None,
+        org_id=current_user.org_id if current_user else None,
+        is_superuser=current_user.is_superuser if current_user else False
+    )
+    
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found or access denied")
+    
+    # Initialize auth manager
+    auth_manager = AuthManager(db.engine)
     
     # Get owner info
-                    owner_info = None
-                    if master.owner:
-                        owner_info = {
-                            "id": master.owner.id,
-                            "username": master.owner.username,
-                            "email": master.owner.email
+    owner = None
+    if doc.owner_id:
+        owner_user = auth_manager.get_user_by_id(doc.owner_id)
+        if owner_user:
+            owner = {
+                'id': owner_user.id,
+                'username': owner_user.username,
+                'email': owner_user.email
             }
     
-                    # Get org info
-                    org_info = None
-                    if master.organization:
-                        org_info = {
-                            "id": master.organization.id,
-                            "name": master.organization.name
-                        }
-                    
-                    return JSONResponse(content={
-                        "id": master.id,
-                        "filename": master.filename_base,
-                        "visibility": master.visibility,
-                        "owner": owner_info,
-                        "organization": org_info,
-                        "shared_users": shared_users,
-                        "shared_roles": shared_roles
-                    })
-                else:
-                    # Legacy document
-                    shared_users_ids = json.loads(document.shared_with_users) if document.shared_with_users else []
-                    shared_roles_codes = json.loads(document.shared_with_roles) if document.shared_with_roles else []
-                    
-                    from src.database import User as DBUser
-                    shared_users = []
-                    if shared_users_ids:
-                        users = session.query(DBUser).filter(DBUser.id.in_(shared_users_ids)).all()
-                        shared_users = [
-                            {
-                                "id": u.id,
-                                "username": u.username,
-                                "email": u.email
-                            } for u in users
-                        ]
-                    
-                    from src.database import Role
-    shared_roles = []
-                    if shared_roles_codes:
-                        roles = session.query(Role).filter(Role.code.in_(shared_roles_codes)).all()
-                        shared_roles = [
-                            {
-                                "code": r.code,
-                                "name": r.name
-                            } for r in roles
-                        ]
-                    
-                    owner_info = None
-                    if document.owner:
-                        owner_info = {
-                            "id": document.owner.id,
-                            "username": document.owner.username,
-                            "email": document.owner.email
-                        }
-                    
-                    org_info = None
-                    if document.organization:
-                        org_info = {
-                            "id": document.organization.id,
-                            "name": document.organization.name
-                        }
+    # Get organization info
+    organization = None
+    if doc.org_id:
+        org = auth_manager.get_organization(doc.org_id)
+        if org:
+            organization = {
+                'id': org.id,
+                'name': org.name
+            }
     
-                    return JSONResponse(content={
-                        "id": document.id,
-                        "filename": document.filename,
-                        "visibility": document.visibility,
-                        "owner": owner_info,
-                        "organization": org_info,
-                        "shared_users": shared_users,
-                        "shared_roles": shared_roles
-                    })
-                    
-            finally:
-                session.close()
-                
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("get_permissions_failed", doc_id=doc_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+    # Get shared users
+    shared_users = []
+    if doc.shared_with_users:
+        import json
+        user_ids = json.loads(doc.shared_with_users) if isinstance(doc.shared_with_users, str) else doc.shared_with_users
+        for user_id in user_ids:
+            user = auth_manager.get_user_by_id(user_id)
+            if user:
+                shared_users.append({
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email
+                })
+    
+    # Get shared roles
+    shared_roles = []
+    if doc.shared_with_roles:
+        import json
+        role_codes = json.loads(doc.shared_with_roles) if isinstance(doc.shared_with_roles, str) else doc.shared_with_roles
+        for role_code in role_codes:
+            role = auth_manager.get_role_by_code(role_code)
+            if role:
+                shared_roles.append({
+                    'code': role.code,
+                    'name': role.name
+                })
+    
+    return {
+        'id': doc.id,
+        'filename': doc.filename,
+        'visibility': doc.visibility or 'private',
+        'owner': owner,
+        'organization': organization,
+        'shared_users': shared_users,
+        'shared_roles': shared_roles
+    }
 
 
 @router.put("/documents/{doc_id}/permissions")
 async def update_document_permissions(
     doc_id: int,
-    visibility: str = Form(...),
-    shared_with_users: Optional[str] = Form("[]"),
-    shared_with_roles: Optional[str] = Form("[]"),
+    request: DocumentPermissionRequest,
     current_user: User = Depends(get_current_user)
 ):
     """
-    Update document permissions.
-    Supports both legacy Document and new DocumentMaster/Version.
+    Update document permissions
+    
+    Only document owner or superuser can update permissions.
+    Shared users must be in the same organization.
     """
     import json
-    try:
-        # Parse JSON arrays
-        shared_users_list = json.loads(shared_with_users) if shared_with_users else []
-        shared_roles_list = json.loads(shared_with_roles) if shared_with_roles else []
+    from sqlalchemy.orm import Session
+    
+    # Get document
+    doc = db.get_document(
+        doc_id,
+        user_id=current_user.id,
+        org_id=current_user.org_id,
+        is_superuser=current_user.is_superuser
+    )
+    
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found or access denied")
+    
+    # Check if user is owner or superuser
+    if doc.owner_id != current_user.id and not current_user.is_superuser:
+        raise HTTPException(
+            status_code=403,
+            detail="Only document owner or administrator can update permissions"
+        )
     
     # Validate visibility
-        if visibility not in ['public', 'organization', 'private']:
+    if request.visibility not in ['public', 'organization', 'private']:
         raise HTTPException(status_code=400, detail="Invalid visibility value")
     
-        with db._db_lock:
-            session = db.get_session()
-            try:
-                from src.database import DocumentMaster, DocumentVersion, Document
-                
-                # Try to find as version first
-                version = session.query(DocumentVersion).filter(DocumentVersion.id == doc_id).first()
-                if version:
-                    master = session.query(DocumentMaster).filter(
-                        DocumentMaster.id == version.document_master_id
-                    ).first()
-                else:
-                    master = session.query(DocumentMaster).filter(DocumentMaster.id == doc_id).first()
-                
-                # Fallback to legacy Document
-                document = None
-                if not master:
-                    document = session.query(Document).filter(Document.id == doc_id).first()
-                
-                if not master and not document:
-                    raise HTTPException(status_code=404, detail="Document not found")
-                
-                # Check permission to update
-                target = master if master else document
-                if not current_user.is_superuser and target.owner_id != current_user.id:
+    # Initialize auth manager
+    auth_manager = AuthManager(db.engine)
+    
+    # Validate shared users (must be in same organization)
+    if request.shared_with_users:
+        for user_id in request.shared_with_users:
+            user = auth_manager.get_user_by_id(user_id)
+            if not user:
+                raise HTTPException(status_code=400, detail=f"User {user_id} not found")
+            if doc.org_id and user.org_id != doc.org_id:
                 raise HTTPException(
-                        status_code=403,
-                        detail="Only document owner can update permissions"
-                    )
-                
-                # Update permissions
-                target.visibility = visibility
-                target.shared_with_users = json.dumps(shared_users_list)
-                target.shared_with_roles = json.dumps(shared_roles_list)
-                target.updated_at = datetime.utcnow()
-                
-                session.commit()
-                
-                logger.info("permissions_updated",
-                           doc_id=doc_id,
-                           type="master" if master else "document",
-                           user_id=current_user.id)
+                    status_code=400,
+                    detail=f"Cannot share with user from different organization"
+                )
+    
+    # Validate shared roles
+    if request.shared_with_roles:
+        for role_code in request.shared_with_roles:
+            role = auth_manager.get_role_by_code(role_code)
+            if not role:
+                raise HTTPException(status_code=400, detail=f"Role {role_code} not found")
+    
+    # Update document permissions
+    session: Session = db.get_session()
+    try:
+        from src.database import Document
+        doc_obj = session.query(Document).filter_by(id=doc_id).first()
         
-                return JSONResponse(content={
-                    "message": "Permissions updated successfully"
-                })
-                
+        if not doc_obj:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        doc_obj.visibility = request.visibility
+        doc_obj.shared_with_users = json.dumps(request.shared_with_users) if request.shared_with_users else None
+        doc_obj.shared_with_roles = json.dumps(request.shared_with_roles) if request.shared_with_roles else None
+        
+        session.commit()
+        
+        return {"message": "Permissions updated successfully"}
     except HTTPException:
         session.rollback()
         raise
     except Exception as e:
         session.rollback()
-                raise e
+        logger.error("failed_to_update_permissions", doc_id=doc_id, error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
-                
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("update_permissions_failed", doc_id=doc_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
 

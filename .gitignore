@@ -17,6 +17,11 @@ ENV/
 *.swp
 *.swo
 .cursor/
+!.cursor/rules/
+!.cursor/extensions/
+
+# Configuration (keep example, ignore real config)
+config.yaml
 
 # Data & Outputs
 data/
@@ -46,10 +51,6 @@ compare_*.py
 Aizimaiti.pdf
 wendanglizi.pdf
 
-# Lock files
-uv.lock
-.python-version
-
 # Logs
 logs/
 *.log
@@ -65,5 +66,6 @@ Thumbs.db
 # Environment
 .env
 .env.local
-logs/
 node_modules/
+frontend/node_modules/
+newrag-mcp/node_modules/
