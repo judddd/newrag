@@ -41,6 +41,9 @@ dependencies = [
     "easyocr>=1.7.0",
     "opencv-python>=4.8.0",
     "minio>=7.2.19",
+    "bcrypt>=4.1.2",
+    "python-jose[cryptography]>=3.3.0",
+    "email-validator>=2.1.0",
 ]
 
 [project.optional-dependencies]
