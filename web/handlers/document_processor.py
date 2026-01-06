@@ -1312,7 +1312,7 @@ def _real_process_document(doc_id: int, file_path: Path, metadata: dict, ocr_eng
         logger.error("❌ subprocess_timeout", error=str(e), doc_id=doc_id)
         task_manager.complete_task(doc_id, success=False, error_message=error_msg)
         db.update_document_status(doc_id, 'failed', error_message=error_msg)
-
+    
     except subprocess.CalledProcessError as e:
         error_msg = f"OCR processing failed: {str(e)}"
         logger.error("❌ subprocess_failed", error=str(e), returncode=e.returncode, 
