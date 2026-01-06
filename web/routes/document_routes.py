@@ -58,7 +58,7 @@ async def list_documents(
         org_id = current_user.org_id if current_user else None
         is_superuser = current_user.is_superuser if current_user else False
         
-        docs = db.list_documents(
+        docs, total = db.list_documents(
             limit=limit, 
             offset=offset, 
             status=status, 
@@ -69,7 +69,7 @@ async def list_documents(
         )
         return JSONResponse(content={
             "documents": [doc.to_dict() for doc in docs],
-            "total": len(docs)
+            "total": total
         })
     except Exception as e:
         logger.error("list_documents_failed", error=str(e), user_id=user_id if current_user else None)
@@ -494,8 +494,8 @@ async def delete_all_documents():
     - Original uploaded files
     """
     try:
-        # 1. Get all documents info before deletion
-        all_docs = db.list_documents(limit=10000)
+        # 1. Get all documents info before deletion (as superuser to see all)
+        all_docs, _ = db.list_documents(limit=10000, is_superuser=True)
         
         deletion_result = {
             "total_docs": len(all_docs),
