@@ -304,7 +304,7 @@ def process_single_pdf(doc_id: int, pdf_path: Path, metadata: dict, ocr_engine: 
             '--ocr-engine', ocr_engine,
             '--output-dir', str(doc_output_dir),
             '--processing-mode', processing_mode
-        ], check=True, timeout=1200)
+        ], check=True, timeout=172800)  # 48 hours timeout
         
         # Check for cancellation after OCR
         if not task_manager.wait_if_paused(doc_id):
@@ -512,7 +512,7 @@ def process_single_pptx(doc_id: int, file_path: Path, metadata: dict, ocr_engine
             str(file_path),
             '-o', str(doc_output_dir),
             '--ocr-engine', ocr_engine
-        ], capture_output=True, text=True, timeout=1200)
+        ], capture_output=True, text=True, timeout=172800)  # 48 hours timeout
         
         if result.returncode != 0:
             logger.error("pptx_processing_failed", error=result.stderr, doc_id=doc_id)
@@ -700,7 +700,7 @@ def process_single_docx(doc_id: int, file_path: Path, metadata: dict, ocr_engine
             str(file_path),
             '-o', str(doc_output_dir),
             '--ocr-engine', ocr_engine
-        ], capture_output=True, text=True, timeout=1200)
+        ], capture_output=True, text=True, timeout=172800)  # 48 hours timeout
         
         if result.returncode != 0:
             logger.error("docx_processing_failed", error=result.stderr, stdout=result.stdout, doc_id=doc_id)
@@ -818,7 +818,7 @@ def process_single_excel(doc_id: int, file_path: Path, metadata: dict, ocr_engin
             str(excel_script),
             str(file_path),
             '-o', str(doc_output_dir)
-        ], capture_output=True, text=True, timeout=1200)
+        ], capture_output=True, text=True, timeout=172800)  # 48 hours timeout
         
         if result.returncode != 0:
             logger.error("excel_processing_failed", error=result.stderr, doc_id=doc_id)
@@ -946,7 +946,7 @@ def process_single_image(doc_id: int, file_path: Path, metadata: dict, ocr_engin
         ]
         logger.info("📝 process_command", doc_id=doc_id, cmd=' '.join(cmd))
         
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=1200)
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=172800)  # 48 hours timeout
         logger.info("✅ image_processing_stdout", doc_id=doc_id, stdout=result.stdout[:500] if result.stdout else "")
         if result.stderr:
             logger.warning("⚠️ image_processing_stderr", doc_id=doc_id, stderr=result.stderr[:500])
