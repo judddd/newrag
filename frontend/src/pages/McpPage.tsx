@@ -73,14 +73,11 @@ export default function McpPage() {
     const configJson = {
       "mcpServers": {
         "newrag": {
-          "command": "node",
-          "args": [],
-          "transport": {
-            "type": "http",
-            "url": mcpUrl,
-            "headers": {
-              "Authorization": `Bearer ${token}`
-            }
+          "initialTimeout": 30,
+          "transport": "sse",
+          "url": mcpUrl,
+          "env": {
+            "AUTHORIZATION": `Bearer ${token}`
           }
         }
       }
@@ -292,14 +289,11 @@ export default function McpPage() {
 {`{
   "mcpServers": {
     "newrag": {
-      "command": "node",
-      "args": [],
-      "transport": {
-        "type": "http",
-        "url": "${mcpUrl}",
-        "headers": {
-          "Authorization": "Bearer YOUR_TOKEN_HERE"
-        }
+      "initialTimeout": 30,
+      "transport": "sse",
+      "url": "${mcpUrl}",
+      "env": {
+        "AUTHORIZATION": "Bearer YOUR_TOKEN_HERE"
       }
     }
   }
