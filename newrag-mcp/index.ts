@@ -165,21 +165,27 @@ function loadRagConfig(): RagConfig | null {
 
 // JWT验证中间件
 function jwtAuthMiddleware(req: Request, res: Response, next: NextFunction) {
-  // 从 Authorization header 提取 token
-  const authHeader = req.headers.authorization;
+  // 从 Authorization header 或 URL 参数提取 token
+  let token = "";
   
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    token = authHeader.substring(7); // 移除 "Bearer "
+  } else if (req.query.token) {
+    // 支持从 URL 参数获取 token
+    token = req.query.token as string;
+  }
+  
+  if (!token) {
     return res.status(401).json({
       jsonrpc: "2.0",
       error: {
         code: -32001,
-        message: "Authentication required. Please provide a valid JWT token.",
+        message: "Authentication required. Provide token in Authorization header or ?token= parameter.",
       },
       id: null,
     });
   }
-
-  const token = authHeader.substring(7); // 移除 "Bearer "
 
   try {
     // 验证 JWT

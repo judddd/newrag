@@ -70,15 +70,13 @@ export default function McpPage() {
   };
 
   const copyTokenWithUrl = (token: string, tokenId: number) => {
+    // 使用 URL 参数传递 token（兼容更多 MCP 客户端）
     const configJson = {
       "mcpServers": {
         "newrag": {
           "initialTimeout": 30,
           "transport": "streamable",
-          "url": mcpUrl,
-          "headers": {
-            "Authorization": `Bearer ${token}`
-          }
+          "url": `${mcpUrl}?token=${token}`
         }
       }
     };
@@ -291,10 +289,7 @@ export default function McpPage() {
     "newrag": {
       "initialTimeout": 30,
       "transport": "streamable",
-      "url": "${mcpUrl}",
-      "headers": {
-        "Authorization": "YOUR_TOKEN_HERE"
-      }
+      "url": "${mcpUrl}?token=YOUR_TOKEN_HERE"
     }
   }
 }`}
