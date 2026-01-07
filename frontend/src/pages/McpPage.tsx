@@ -70,13 +70,23 @@ export default function McpPage() {
   };
 
   const copyTokenWithUrl = (token: string, tokenId: number) => {
-    const fullConfig = `MCP Server URL: ${mcpUrl}
-Bearer Token: ${token}
-
-在 MCP 客户端中使用时，请在 HTTP Header 中添加：
-Authorization: Bearer ${token}`;
+    const configJson = {
+      "mcpServers": {
+        "newrag": {
+          "command": "node",
+          "args": [],
+          "transport": {
+            "type": "http",
+            "url": mcpUrl,
+            "headers": {
+              "Authorization": `Bearer ${token}`
+            }
+          }
+        }
+      }
+    };
     
-    navigator.clipboard.writeText(fullConfig);
+    navigator.clipboard.writeText(JSON.stringify(configJson, null, 2));
     setCopiedId(tokenId);
     setTimeout(() => setCopiedId(null), 2000);
   };
@@ -160,7 +170,7 @@ Authorization: Bearer ${token}`;
             MCP 访问令牌
           </h2>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-            创建和管理用于 MCP 客户端身份验证的长期令牌
+            创建 Token 后自动复制完整 JSON 配置，直接粘贴到 Cursor / Claude Desktop
           </p>
         </div>
 
@@ -237,7 +247,7 @@ Authorization: Bearer ${token}`;
                       <button
                         onClick={() => copyTokenWithUrl(token.token, token.id)}
                         className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 transition-colors"
-                        title="复制 Token 和配置"
+                        title="复制完整 JSON 配置"
                       >
                         {copiedId === token.id ? (
                           <Check size={18} className="text-green-600" />
@@ -261,59 +271,50 @@ Authorization: Bearer ${token}`;
         </div>
       </div>
 
-      {/* Capabilities Card */}
+      {/* Configuration Guide */}
       <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
         <div className="p-6 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
             <BookOpen className="w-5 h-5 text-slate-500" />
-            功能说明
+            配置指南
           </h2>
         </div>
-        <div className="p-6">
-          <div className="prose dark:prose-invert max-w-none text-slate-600 dark:text-slate-400">
-            <p className="mb-4">
-              NewRAG MCP 服务器提供了一套标准化的接口，允许 AI 助手直接与您的知识库进行交互。
-              通过集成此 MCP 服务，您可以：
+        <div className="p-6 space-y-4">
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+              Cursor / Claude Desktop 配置
+            </h3>
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              点击 Token 旁的复制按钮，自动复制配置 JSON，粘贴到 MCP 配置文件：
             </p>
-            <ul className="grid gap-3 md:grid-cols-2 list-none pl-0">
-              <li className="flex gap-3 items-start">
-                <div className="mt-1 w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />
-                <span>
-                  <strong className="text-slate-900 dark:text-slate-200">混合检索：</strong> 
-                  结合向量语义搜索和 BM25 关键词搜索，精准定位文档内容。
-                </span>
-              </li>
-              <li className="flex gap-3 items-start">
-                <div className="mt-1 w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />
-                <span>
-                  <strong className="text-slate-900 dark:text-slate-200">权限隔离：</strong> 
-                  MCP Token 继承用户权限，确保只能访问被授权的文档。
-                </span>
-              </li>
-              <li className="flex gap-3 items-start">
-                <div className="mt-1 w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />
-                <span>
-                  <strong className="text-slate-900 dark:text-slate-200">元数据查询：</strong> 
-                  访问文档的完整元数据，包括文件名、作者、上传时间等。
-                </span>
-              </li>
-              <li className="flex gap-3 items-start">
-                <div className="mt-1 w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />
-                <span>
-                  <strong className="text-slate-900 dark:text-slate-200">直接 API 访问：</strong> 
-                  提供执行原始 Elasticsearch 查询的能力，用于复杂分析。
-                </span>
-              </li>
-            </ul>
-            
-            <div className="mt-6 p-4 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-lg">
-              <p className="text-sm text-indigo-900 dark:text-indigo-300 font-medium mb-2">
-                🔐 安全提示
-              </p>
-              <p className="text-sm text-indigo-800 dark:text-indigo-400">
-                MCP Token 是长期有效的访问凭证，请妥善保管。建议为每个客户端创建独立的 Token，并在不再需要时及时撤销。
-              </p>
+            <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-4 border border-slate-200 dark:border-slate-700">
+              <code className="text-xs font-mono text-slate-700 dark:text-slate-300 whitespace-pre-wrap break-all">
+{`{
+  "mcpServers": {
+    "newrag": {
+      "command": "node",
+      "args": [],
+      "transport": {
+        "type": "http",
+        "url": "${mcpUrl}",
+        "headers": {
+          "Authorization": "Bearer YOUR_TOKEN_HERE"
+        }
+      }
+    }
+  }
+}`}
+              </code>
             </div>
+          </div>
+
+          <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+            <p className="text-sm text-amber-900 dark:text-amber-300 font-medium mb-1">
+              🔐 安全提示
+            </p>
+            <p className="text-xs text-amber-800 dark:text-amber-400">
+              Token 是长期凭证，请妥善保管。为每个设备创建独立 Token，不用时及时删除。
+            </p>
           </div>
         </div>
       </div>
