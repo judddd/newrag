@@ -22,7 +22,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // JWT Configuration (should match backend config)
-const JWT_SECRET = process.env.JWT_SECRET || "your-super-secret-key-please-change-this-in-production";
+// Try to load from ragConfig first, fallback to env var
+let JWT_SECRET: string = process.env.JWT_SECRET || "";
 const JWT_ALGORITHM = "HS256";
 
 // User context extracted from JWT
@@ -125,6 +126,9 @@ interface RagConfig {
   mcp?: {
     host?: string;
     port?: number;
+  };
+  security?: {
+    jwt_secret?: string;
   };
 }
 
@@ -893,6 +897,15 @@ ${source.text || ""}
 
 // 加载配置
 const ragConfig = loadRagConfig();
+
+// 从 config.yaml 读取 JWT secret，如果没有则使用环境变量
+if (!JWT_SECRET && ragConfig?.security?.jwt_secret) {
+  JWT_SECRET = ragConfig.security.jwt_secret;
+}
+if (!JWT_SECRET) {
+  JWT_SECRET = "your-super-secret-key-please-change-this-in-production";
+  process.stderr.write("⚠️  Warning: Using default JWT_SECRET. Set JWT_SECRET env var or security.jwt_secret in config.yaml\n");
+}
 
 const config: ElasticsearchConfig = {
   url: ragConfig?.elasticsearch?.hosts[0] || process.env.ES_URL || "http://localhost:9200",
