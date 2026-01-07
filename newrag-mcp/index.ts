@@ -907,10 +907,13 @@ const ragConfig = loadRagConfig();
 // 从 config.yaml 读取 JWT secret，如果没有则使用环境变量
 if (!JWT_SECRET && ragConfig?.security?.jwt_secret) {
   JWT_SECRET = ragConfig.security.jwt_secret;
+  process.stderr.write(`✓ JWT_SECRET loaded from config.yaml (${JWT_SECRET.substring(0, 20)}...)\n`);
 }
 if (!JWT_SECRET) {
   JWT_SECRET = "your-super-secret-key-please-change-this-in-production";
   process.stderr.write("⚠️  Warning: Using default JWT_SECRET. Set JWT_SECRET env var or security.jwt_secret in config.yaml\n");
+} else if (process.env.JWT_SECRET) {
+  process.stderr.write(`✓ JWT_SECRET loaded from environment variable\n`);
 }
 
 const config: ElasticsearchConfig = {

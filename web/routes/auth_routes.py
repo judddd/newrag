@@ -18,6 +18,7 @@ from web.dependencies.auth_deps import get_current_user, db_session, get_db_mana
 # JWT Configuration
 security_config = config.security_config
 JWT_SECRET = os.getenv('JWT_SECRET') or security_config.get('jwt_secret', 'default-secret-key')
+print(f"🔐 Backend JWT_SECRET: {JWT_SECRET[:5]}...{JWT_SECRET[-5:]} (len={len(JWT_SECRET)})")
 JWT_ALGORITHM = os.getenv('JWT_ALGORITHM') or security_config.get('jwt_algorithm', 'HS256')
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('JWT_ACCESS_TOKEN_EXPIRE_MINUTES') or security_config.get('jwt_access_token_expire_minutes', 60))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv('JWT_REFRESH_TOKEN_EXPIRE_DAYS') or security_config.get('jwt_refresh_token_expire_days', 30))
