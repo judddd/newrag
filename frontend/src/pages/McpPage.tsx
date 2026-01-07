@@ -293,7 +293,7 @@ export default function McpPage() {
       "transport": "streamable",
       "url": "${mcpUrl}",
       "headers": {
-        "Authorization": "Bearer YOUR_TOKEN_HERE"
+        "Authorization": "YOUR_TOKEN_HERE"
       }
     }
   }
