@@ -74,10 +74,10 @@ export default function McpPage() {
       "mcpServers": {
         "newrag": {
           "initialTimeout": 30,
-          "transport": "sse",
+          "transport": "streamable",
           "url": mcpUrl,
-          "env": {
-            "AUTHORIZATION": `Bearer ${token}`
+          "headers": {
+            "Authorization": `Bearer ${token}`
           }
         }
       }
@@ -167,7 +167,7 @@ export default function McpPage() {
             MCP 访问令牌
           </h2>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-            创建 Token 后自动复制完整 JSON 配置，直接粘贴到 Cursor / Claude Desktop
+            创建 Token 后自动复制完整 JSON 配置，直接粘贴到 NewChat
           </p>
         </div>
 
@@ -290,10 +290,10 @@ export default function McpPage() {
   "mcpServers": {
     "newrag": {
       "initialTimeout": 30,
-      "transport": "sse",
+      "transport": "streamable",
       "url": "${mcpUrl}",
-      "env": {
-        "AUTHORIZATION": "Bearer YOUR_TOKEN_HERE"
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN_HERE"
       }
     }
   }

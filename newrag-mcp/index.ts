@@ -866,7 +866,7 @@ ${source.text || ""}
 `;
         });
 
-        const firstDoc = result.hits.hits[0]._source;
+        const firstDoc: any = result.hits.hits[0]._source;
         return {
           content: [
             {

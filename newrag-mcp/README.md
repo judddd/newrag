@@ -88,82 +88,15 @@ curl http://localhost:3000/health
 
 ### 1. hybrid_search - 智能混合搜索
 
-自动执行向量+BM25混合搜索，大模型只需提供查询文本。
+向量+BM25混合搜索，自动处理embedding。
 
-**参数:**
-- `query` (必需): 搜索查询文本
-- `index` (可选): 指定索引名称，默认使用配置文件中的索引
-- `size` (可选): 返回结果数量，默认10条
-- `min_score` (可选): 最低相关度分数阈值
+### 2. keyword_search - 纯关键词搜索
 
-**示例调用:**
-```json
-{
-  "query": "如何配置 Elasticsearch 集群？",
-  "size": 5,
-  "min_score": 0.5
-}
-```
+BM25算法，速度快，适合精确匹配。
 
-**自动处理步骤:**
-1. 查询文本自动转换为向量 (调用配置的 embedding API)
-2. 构建混合搜索查询 (向量 + BM25)
-3. 执行搜索并返回高亮结果
+### 3. get_document_chunks - 获取完整文档
 
-### 2. execute_es_api - 执行 ES API
-
-直接访问任意 Elasticsearch API 端点。
-
-**参数:**
-- `method` (必需): HTTP方法 (GET/POST/PUT/DELETE/HEAD)
-- `path` (必需): API路径 (如 "_search", "my_index/_mapping")
-- `params` (可选): URL查询参数
-- `body` (可选): 请求体
-- `headers` (可选): 自定义HTTP头
-
-**示例调用:**
-
-查看索引mapping:
-```json
-{
-  "method": "GET",
-  "path": "aiops_knowledge_base/_mapping"
-}
-```
-
-执行自定义查询:
-```json
-{
-  "method": "POST",
-  "path": "aiops_knowledge_base/_search",
-  "body": {
-    "query": {
-      "match": {
-        "title": "运维手册"
-      }
-    },
-    "size": 10
-  }
-}
-```
-
-聚合统计:
-```json
-{
-  "method": "POST",
-  "path": "aiops_knowledge_base/_search",
-  "body": {
-    "size": 0,
-    "aggs": {
-      "by_category": {
-        "terms": {
-          "field": "metadata.category.keyword"
-        }
-      }
-    }
-  }
-}
-```
+根据document_id获取文档所有页面。
 
 ## 📝 使用场景
 
