@@ -695,111 +695,192 @@ export async function createElasticsearchMcpServer(
     }
   );
 
-  // 工具2: 直接执行Elasticsearch API
-  // 提供完整的ES API访问能力，用于高级查询、聚合分析、索引管理等
+  // 工具2: 纯关键词搜索（BM25）
   server.tool(
-    "execute_es_api",
-    `直接执行任意Elasticsearch API端点。
+    "keyword_search",
+    `执行纯关键词搜索（BM25算法），速度快，不使用向量embedding。
     
-该工具提供对Elasticsearch的完全访问权限，可用于：
-- 执行自定义查询DSL（不使用向量的纯BM25搜索、布尔查询等）
-- 聚合分析（统计、分组、趋势分析）
-- 索引管理（查看mapping、settings、创建/删除索引）
-- 集群管理（健康检查、节点信息、分片状态）
-
-使用场景：
-- 需要精确控制查询逻辑时
-- 执行聚合统计分析
-- 查看索引结构和mappings
-- 执行不需要向量搜索的场景
-
-示例端点：
-- _search: 搜索
-- _mapping: 查看字段映射
-- _settings: 查看索引设置
-- _cat/indices: 列出所有索引
-- _cluster/health: 集群健康状态`,
+适用场景：
+- 精确关键词匹配（文件名、编号、标签等）
+- 需要快速响应的场景
+- 不需要语义理解的查询`,
     {
-      method: z
-        .enum(["GET", "POST", "PUT", "DELETE", "HEAD"])
-        .describe("HTTP请求方法"),
-
-      path: z
+      query: z
         .string()
         .trim()
         .min(1)
-        .describe(
-          "API端点路径 (例如: '_search', 'my_index/_search', '_cluster/health')"
-        ),
+        .describe("搜索关键词"),
 
-      params: z
-        .record(z.any())
+      index: z
+        .string()
         .optional()
-        .describe("可选：URL查询参数"),
+        .describe("索引名称"),
 
-      body: z
-        .record(z.any())
+      size: z
+        .number()
+        .int()
+        .positive()
+        .max(100)
         .optional()
-        .describe("可选：请求体（JSON对象）"),
-
-      headers: z
-        .record(z.string())
-        .optional()
-        .describe("可选：自定义HTTP头"),
+        .default(10)
+        .describe("返回结果数量"),
     },
-    async ({ method, path, params, body, headers }) => {
+    async ({ query, index, size = 10 }) => {
       try {
-        const sanitizedPath = path.startsWith("/") ? path.substring(1) : path;
+        const targetIndex = index || ragConfig?.elasticsearch?.index_name || "aiops_knowledge_base";
+        const permissionFilter = buildPermissionFilter(user);
 
-        let customHeaders = headers || {};
-        if (body && !customHeaders["Content-Type"]) {
-          customHeaders["Content-Type"] = "application/json";
-        }
-
-        const options: any = {
-          method,
-          path: sanitizedPath,
-          querystring: params || {},
-          body: body || undefined,
-          headers: customHeaders,
+        const searchBody: any = {
+          size,
+          query: {
+            bool: {
+              must: [
+                permissionFilter,
+                {
+                  multi_match: {
+                    query: query,
+                    fields: [
+                      "text^3",
+                      "metadata.filename^2.5",
+                      "metadata.description^2",
+                      "document_name^2",
+                      "drawing_number^2",
+                      "project_name^1.5",
+                    ],
+                    type: "best_fields",
+                    operator: "or",
+                    fuzziness: "AUTO",
+                  },
+                },
+              ],
+            },
+          },
+          highlight: {
+            fields: {
+              text: { fragment_size: 150, number_of_fragments: 3 },
+              "metadata.filename": {},
+            },
+          },
         };
 
-        const response = await esClient.transport.request(options);
+        const result = await esClient.search({
+          index: targetIndex,
+          body: searchBody,
+        });
+
+        const totalHits = typeof result.hits.total === "number" ? result.hits.total : result.hits.total?.value || 0;
+        const formattedResults = result.hits.hits.map((hit: any, idx: number) => {
+          const source = hit._source || {};
+          const highlights = hit.highlight || {};
+          const metadata = source.metadata || {};
+
+          return `
+━━━ 结果 ${idx + 1} (分数: ${hit._score?.toFixed(3)}) ━━━
+📄 ${metadata.filename || "未知文件"}
+📃 页码: ${metadata.page_number || "N/A"}
+📝 ${highlights.text ? highlights.text[0] : source.text?.substring(0, 200)}
+`;
+        });
 
         return {
           content: [
             {
               type: "text" as const,
-              text: `✓ 成功执行 ${method} ${path}`,
-            },
-            {
-              type: "text" as const,
-              text: JSON.stringify(response, null, 2),
+              text: `🔍 关键词搜索: "${query}"\n总数: ${totalHits} | 返回: ${result.hits.hits.length}\n${formattedResults.join("\n")}`,
             },
           ],
         };
       } catch (error) {
-        console.error(
-          `Elasticsearch API request failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        );
-
-        let errorDetails = "";
-        if (error instanceof Error && "meta" in error && error.meta) {
-          const meta = error.meta as any;
-          if (meta.body) {
-            errorDetails = `\n错误详情: ${JSON.stringify(meta.body, null, 2)}`;
-          }
-        }
-
         return {
           content: [
             {
               type: "text" as const,
-              text: `❌ API调用失败: ${
-                error instanceof Error ? error.message : String(error)
-              }${errorDetails}`,
+              text: `❌ 搜索失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // 工具3: 根据文档ID获取完整文档
+  server.tool(
+    "get_document_chunks",
+    `根据document_id获取文档的所有chunks。
+    
+适用场景：
+- 查看完整文档内容
+- 获取特定文档的所有页面`,
+    {
+      document_id: z
+        .number()
+        .int()
+        .positive()
+        .describe("文档ID"),
+
+      index: z
+        .string()
+        .optional()
+        .describe("索引名称"),
+    },
+    async ({ document_id, index }) => {
+      try {
+        const targetIndex = index || ragConfig?.elasticsearch?.index_name || "aiops_knowledge_base";
+        const permissionFilter = buildPermissionFilter(user);
+
+        const searchBody: any = {
+          size: 1000,
+          query: {
+            bool: {
+              must: [
+                permissionFilter,
+                { term: { "metadata.document_id": document_id } },
+              ],
+            },
+          },
+          sort: [{ "metadata.page_number": "asc" }],
+        };
+
+        const result = await esClient.search({
+          index: targetIndex,
+          body: searchBody,
+        });
+
+        if (result.hits.hits.length === 0) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `❌ 未找到文档ID: ${document_id}`,
+              },
+            ],
+          };
+        }
+
+        const chunks = result.hits.hits.map((hit: any) => {
+          const source = hit._source || {};
+          const metadata = source.metadata || {};
+          return `
+━━━ 页码 ${metadata.page_number} ━━━
+${source.text || ""}
+`;
+        });
+
+        const firstDoc = result.hits.hits[0]._source;
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `📄 文档: ${firstDoc.metadata?.filename}\n总页数: ${result.hits.hits.length}\n\n${chunks.join("\n")}`,
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `❌ 查询失败: ${error instanceof Error ? error.message : String(error)}`,
             },
           ],
         };
