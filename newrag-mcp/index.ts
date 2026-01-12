@@ -629,6 +629,20 @@ export async function createElasticsearchMcpServer(
             }
           }
 
+          // 视觉内容描述 (新增！)
+          if (source.visual_description || source.page_type) {
+            resultText += `\n🎨 页面视觉信息:\n`;
+            if (source.page_type) {
+              resultText += `   页面类型: ${source.page_type}\n`;
+            }
+            if (source.visual_description) {
+              const visualDesc = source.visual_description.length > 300
+                ? source.visual_description.substring(0, 300) + "..."
+                : source.visual_description;
+              resultText += `   视觉描述: ${visualDesc}\n`;
+            }
+          }
+
           // 匹配内容
           resultText += `\n📝 匹配内容:\n`;
           if (highlights.text && highlights.text.length > 0) {
@@ -651,6 +665,8 @@ export async function createElasticsearchMcpServer(
             filename: metadata.filename,
             page_number: metadata.page_number,
             total_pages: metadata.total_pages,
+            page_type: source.page_type,                    // 页面类型 (新增)
+            visual_description: source.visual_description,   // 视觉描述 (新增)
             original_file_url: metadata.original_file_url,  // 原始PDF/DOCX等
             page_image_url: metadata.page_image_url,        // 页面PNG图片
             minio_bucket: metadata.minio_bucket,
@@ -784,12 +800,34 @@ export async function createElasticsearchMcpServer(
           const highlights = hit.highlight || {};
           const metadata = source.metadata || {};
 
-          return `
-━━━ 结果 ${idx + 1} (分数: ${hit._score?.toFixed(3)}) ━━━
-📄 ${metadata.filename || "未知文件"}
-📃 页码: ${metadata.page_number || "N/A"}
-📝 ${highlights.text ? highlights.text[0] : source.text?.substring(0, 200)}
-`;
+          let resultText = `\n━━━ 结果 ${idx + 1} (分数: ${hit._score?.toFixed(3)}) ━━━\n`;
+          resultText += `🔑 ES文档ID: ${hit._id}\n`;
+          resultText += `📄 文件名: ${metadata.filename || "未知文件"}\n`;
+          resultText += `📃 页码: ${metadata.page_number || "N/A"}`;
+          if (metadata.total_pages) {
+            resultText += ` / ${metadata.total_pages}`;
+          }
+          resultText += `\n`;
+          
+          // 添加视觉描述 (新增！)
+          if (source.page_type) {
+            resultText += `📊 页面类型: ${source.page_type}\n`;
+          }
+          if (source.visual_description) {
+            const visualDesc = source.visual_description.length > 200
+              ? source.visual_description.substring(0, 200) + "..."
+              : source.visual_description;
+            resultText += `🎨 视觉描述: ${visualDesc}\n`;
+          }
+          
+          resultText += `\n📝 匹配内容:\n`;
+          if (highlights.text && highlights.text.length > 0) {
+            resultText += highlights.text[0] + "\n";
+          } else if (source.text) {
+            resultText += source.text.substring(0, 200) + "...\n";
+          }
+          
+          return resultText;
         });
 
         return {
@@ -870,10 +908,27 @@ export async function createElasticsearchMcpServer(
         const chunks = result.hits.hits.map((hit: any) => {
           const source = hit._source || {};
           const metadata = source.metadata || {};
-          return `
-━━━ 页码 ${metadata.page_number} ━━━
-${source.text || ""}
-`;
+          
+          let chunkText = `\n━━━ 页码 ${metadata.page_number} ━━━\n`;
+          
+          // 添加视觉信息 (新增！)
+          if (source.page_type || source.visual_description) {
+            chunkText += `\n🎨 页面视觉信息:\n`;
+            if (source.page_type) {
+              chunkText += `   类型: ${source.page_type}\n`;
+            }
+            if (source.visual_description) {
+              const visualDesc = source.visual_description.length > 300
+                ? source.visual_description.substring(0, 300) + "..."
+                : source.visual_description;
+              chunkText += `   描述: ${visualDesc}\n`;
+            }
+            chunkText += `\n`;
+          }
+          
+          chunkText += `📝 页面内容:\n${source.text || ""}\n`;
+          
+          return chunkText;
         });
 
         const firstDoc: any = result.hits.hits[0]._source;
