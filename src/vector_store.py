@@ -137,6 +137,74 @@ class VectorStore:
             }
         }]
     
+    def _promote_metadata_fields(self, doc_ids: List[str]) -> None:
+        """
+        Promote critical fields from metadata to top level for easier querying.
+        
+        Langchain's ElasticsearchStore puts all doc.metadata fields inside the 'metadata' object,
+        but our ES mapping and queries expect certain fields at the top level.
+        
+        This method uses bulk update API to move fields from metadata.* to top level.
+        """
+        # Fields to promote from metadata to top level
+        fields_to_promote = [
+            'visual_description',
+            'page_type',
+            'drawing_number',
+            'project_name',
+            'all_components',
+            'equipment_tags',
+            'equipment_names',
+            'table_cells',
+            'all_text_tokens',
+            'component_details'
+        ]
+        
+        # Build painless script to copy fields from metadata to top level
+        # Script checks if field exists in metadata before copying
+        script_lines = []
+        for field in fields_to_promote:
+            script_lines.append(
+                f"if (ctx._source.metadata?.{field} != null) {{ "
+                f"ctx._source.{field} = ctx._source.metadata.{field}; "
+                f"}}"
+            )
+        
+        painless_script = " ".join(script_lines)
+        
+        # Use update_by_query to update all documents in batch
+        try:
+            response = self.es_client.update_by_query(
+                index=self.index_name,
+                body={
+                    "query": {
+                        "ids": {
+                            "values": doc_ids
+                        }
+                    },
+                    "script": {
+                        "source": painless_script,
+                        "lang": "painless"
+                    }
+                },
+                refresh=True,  # Make changes immediately searchable
+                conflicts="proceed"  # Continue even if there are version conflicts
+            )
+            
+            logger.info(
+                "fields_promoted",
+                updated=response.get('updated', 0),
+                total=response.get('total', 0),
+                fields=fields_to_promote
+            )
+        except Exception as e:
+            logger.error(
+                "field_promotion_error",
+                error=str(e),
+                num_docs=len(doc_ids)
+            )
+            raise
+    
     def add_documents(
         self,
         documents: List[Document],
@@ -391,6 +459,15 @@ class VectorStore:
                                     doc_index=doc_idx,
                                     **error_details
                                 )
+            
+            # Promote critical fields from metadata to top level for easier querying
+            if ids:
+                logger.info("🔄 Promoting fields from metadata to top level...", num_docs=len(ids))
+                try:
+                    self._promote_metadata_fields(ids)
+                    logger.info("✅ Field promotion completed", num_docs=len(ids))
+                except Exception as e:
+                    logger.error("❌ Field promotion failed", error=str(e))
             
             # Verify ES write success by checking actual indexed documents
             # Query ES to confirm documents are actually there
