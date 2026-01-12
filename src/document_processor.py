@@ -745,6 +745,24 @@ class DocumentProcessor:
         """
         flattened = {}
         
+        # Extract visual description from page_analysis (for visual content search)
+        page_analysis = page_json.get('page_analysis', {})
+        if isinstance(page_analysis, dict):
+            # New format: visual_description (merged field)
+            visual_desc = page_analysis.get('visual_description', '')
+            
+            # Legacy format compatibility: merge page_description + layout_structure
+            if not visual_desc:
+                page_desc = page_analysis.get('page_description', '')
+                layout_struct = page_analysis.get('layout_structure', '')
+                visual_desc = f"{page_desc} {layout_struct}".strip()
+            
+            flattened['visual_description'] = visual_desc
+            flattened['page_type'] = page_analysis.get('page_type', '')
+        else:
+            flattened['visual_description'] = ''
+            flattened['page_type'] = ''
+        
         # Check format and extract accordingly
         if 'content' in page_json:
             # refine_with_vlm.py format

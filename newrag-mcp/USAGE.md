@@ -106,7 +106,62 @@ npm start
 }
 ```
 
-### 3. 获取完整文档 (get_document_chunks)
+### 3. 视觉内容搜索 (search_by_visual_content) 🆕
+
+**根据视觉特征查找页面:**
+
+```
+查找包含电路图的页面
+```
+
+大模型会调用：
+```json
+{
+  "tool": "search_by_visual_content",
+  "query": "电路图 wiring diagram",
+  "size": 10
+}
+```
+
+**查找特定视觉元素:**
+```
+搜索有红色公章或签名的文档页面
+```
+
+大模型会调用：
+```json
+{
+  "tool": "search_by_visual_content",
+  "query": "红色公章 签名 stamp signature",
+  "size": 5
+}
+```
+
+**定位特定布局:**
+```
+找包含表格且表格在页面左上角的页面
+```
+
+大模型会调用：
+```json
+{
+  "tool": "search_by_visual_content",
+  "query": "表格在左上角 table in upper-left corner",
+  "size": 10
+}
+```
+
+**适用场景:**
+- ✅ 查找特定图表类型（电路图、流程图、平面图、组织结构图等）
+- ✅ 搜索包含特定视觉元素（公章、签名、水印、logo、图片等）
+- ✅ 定位特定页面类型（标题页、数据表格页、技术图纸、表单等）
+- ✅ 查找特定布局结构（多栏布局、表格位置等）
+
+**不适用场景:**
+- ❌ 搜索文本内容（请使用 `hybrid_search` 或 `keyword_search`）
+- ❌ 查找具体的文字或数据（请使用 `hybrid_search`）
+
+### 4. 获取完整文档 (get_document_chunks)
 
 **根据ID获取文档:**
 ```

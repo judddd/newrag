@@ -898,6 +898,190 @@ ${source.text || ""}
     }
   );
 
+  // 🎨 视觉内容搜索工具
+  server.tool(
+    "search_by_visual_content",
+    `根据视觉内容描述搜索文档页面。
+    
+该工具专门用于基于页面的视觉特征进行搜索，而非文本内容。适用于：
+- 查找包含特定图表类型的页面（如"电路图"、"流程图"、"表格"）
+- 搜索有特定视觉元素的页面（如"红色公章"、"签名"、"水印"）
+- 定位特定布局的页面（如"表格在左上角"、"多栏布局"）
+- 查找特定类型的文档页面（如"标题页"、"数据表格页"、"技术图纸"）
+
+注意：此工具使用语义向量搜索 visual_description 字段，适合视觉内容查询。
+如需搜索文档文本内容，请使用 hybrid_search 或 keyword_search。`,
+    {
+      query: z
+        .string()
+        .trim()
+        .min(1, "Query text is required")
+        .describe("视觉内容搜索查询，描述想要查找的页面视觉特征"),
+
+      index: z
+        .string()
+        .optional()
+        .describe("可选：指定索引名称，默认使用配置文件中的索引"),
+
+      size: z
+        .number()
+        .int()
+        .positive()
+        .max(100)
+        .optional()
+        .default(10)
+        .describe("返回结果数量，默认10条"),
+
+      min_score: z
+        .number()
+        .min(0)
+        .max(1)
+        .optional()
+        .describe("可选：最低相关度分数阈值(0-1)"),
+    },
+    async ({ query, index, size = 10, min_score }) => {
+      try {
+        const targetIndex =
+          index || ragConfig?.elasticsearch?.index_name || "aiops_knowledge_base";
+
+        // 生成查询向量
+        process.stderr.write(`🎨 Generating embedding for visual query: "${query}"\n`);
+        const queryVector = await generateEmbedding(query, ragConfig);
+        process.stderr.write(`✓ Embedding generated (${queryVector.length} dimensions)\n`);
+
+        // 构建权限过滤
+        const permissionFilter = buildPermissionFilter(user);
+
+        // 仅对 visual_description 字段进行向量搜索
+        const searchBody: any = {
+          size,
+          query: {
+            bool: {
+              must: [
+                permissionFilter,
+                {
+                  script_score: {
+                    query: { 
+                      bool: {
+                        must: [
+                          { exists: { field: "visual_description" } }
+                        ]
+                      }
+                    },
+                    script: {
+                      source: "cosineSimilarity(params.query_vector, 'content_vector') + 1.0",
+                      params: {
+                        query_vector: queryVector,
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+          // 高亮显示 visual_description
+          highlight: {
+            fields: {
+              visual_description: {
+                fragment_size: 200,
+                number_of_fragments: 2,
+                pre_tags: ["<mark>"],
+                post_tags: ["</mark>"],
+              },
+              page_type: {
+                fragment_size: 50,
+                number_of_fragments: 1,
+                pre_tags: ["<mark>"],
+                post_tags: ["</mark>"],
+              },
+            },
+          },
+          // 返回必要字段
+          _source: [
+            "text",
+            "visual_description",
+            "page_type",
+            "metadata.filename",
+            "metadata.page_number",
+            "metadata.document_id",
+            "document_name",
+          ],
+        };
+
+        // 添加最低分数过滤
+        if (min_score !== undefined) {
+          searchBody.min_score = min_score;
+        }
+
+        process.stderr.write(`🔍 Searching visual content in index: ${targetIndex}\n`);
+        const result = await esClient.search({
+          index: targetIndex,
+          body: searchBody,
+        });
+
+        process.stderr.write(`✓ Found ${result.hits.hits.length} results\n`);
+
+        if (result.hits.hits.length === 0) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `❌ 未找到匹配的视觉内容: "${query}"`,
+              },
+            ],
+          };
+        }
+
+        const formattedResults = result.hits.hits.map((hit: any) => {
+          const source = hit._source || {};
+          const metadata = source.metadata || {};
+          const highlights = hit.highlight || {};
+          const score = hit._score || 0;
+
+          let result = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📄 文档: ${metadata.filename || source.document_name || "未知"}
+📍 页码: ${metadata.page_number || "N/A"}
+📊 页面类型: ${source.page_type || "未知"}
+⭐ 相关度: ${score.toFixed(4)}
+
+🎨 视觉描述:
+${highlights.visual_description ? highlights.visual_description.join("\n...") : source.visual_description || "无视觉描述"}
+`;
+
+          // 如果有文本内容预览，显示前150字符
+          if (source.text) {
+            const preview = source.text.substring(0, 150);
+            result += `\n📝 内容预览: ${preview}${source.text.length > 150 ? "..." : ""}`;
+          }
+
+          return result;
+        });
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `🎨 视觉内容搜索结果 (查询: "${query}")
+找到 ${result.hits.hits.length} 个相关页面
+
+${formattedResults.join("\n\n")}`,
+            },
+          ],
+        };
+      } catch (error) {
+        process.stderr.write(`❌ Visual search error: ${error}\n`);
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `❌ 视觉内容搜索失败: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
   return server;
 }
 

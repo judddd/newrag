@@ -77,6 +77,15 @@
       "page_type": {
         "type": "keyword"
       },
+      "visual_description": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 512
+          }
+        }
+      },
       "original_content": {
         "type": "object",
         "enabled": false

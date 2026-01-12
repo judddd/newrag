@@ -70,11 +70,21 @@ class VLMRefiner:
 
 **Your Analysis Must Include:**
 
-1. **Visual Page Description** (Most Important!)
-   - Describe what you SEE in this page image (layout, structure, visual elements)
-   - What type of page is this? (title page / data table / diagram / form / mixed content)
-   - What is the PURPOSE of this page in the document?
-   - Note visual elements: tables, diagrams, stamps, signatures, logos, borders, etc.
+1. **Detailed Visual Description** (CRITICAL for Visual Content Search!)
+   **Write a comprehensive 200-400 word description covering:**
+   - **Layout & Structure:** Page orientation, columns, sections, header/footer, spatial organization
+   - **Visual Elements (count & location):** Tables (how many, where located), diagrams (type, complexity, position), charts, photos, stamps, logos, signatures, borders
+   - **Colors & Styling:** Dominant colors, highlighting, color-coded elements, backgrounds, font sizes
+   - **Text Layout:** Font hierarchy, text density, alignment, headings structure
+   - **Page Type & Purpose:** What kind of page is this? (title page / data table / technical diagram / form / invoice / resume / contract / mixed)
+   - **Unique Features:** Watermarks, annotations, handwritten notes, quality issues, distinguishing characteristics
+   
+   **This description will be used for SEMANTIC SEARCH queries like:**
+   - "Find pages with circuit diagrams"
+   - "Search for documents with red stamps"
+   - "Locate pages with tables in the upper-left corner"
+   
+   **Be extremely detailed and specific!**
 
 2. **Content Understanding**
    - Fix OCR errors (e.g., "4-AU9-25" → "4-Aug-25", "伛 SeP 3" → "15-Sep-25")
@@ -94,9 +104,8 @@ Respond ONLY with a valid JSON object:
   "page_analysis": {{
     "page_number": {page_number},
     "page_type": "title_page | data_table | diagram | text_content | form | mixed",
-    "page_description": "50-150 words describing what this page IS and what you SEE in the image",
-    "visual_elements": ["table", "stamp", "logo", "etc"],
-    "layout_structure": "Brief description of visual layout"
+    "visual_description": "200-400 words DETAILED description of EVERYTHING visible: layout structure, colors, visual elements with counts and locations, text hierarchy, spatial organization, watermarks, stamps, logos, diagrams details, table positions, unique visual features, etc. Be extremely specific for semantic search.",
+    "visual_elements": ["table", "diagram", "stamp", "logo", "photo", "chart", "signature", "border", "watermark", "annotation"]
   }},
   
   "extracted_content": {{
@@ -128,7 +137,10 @@ Respond ONLY with a valid JSON object:
 }}
 ```
 
-**Critical:** The page_description must describe WHAT YOU SEE in the image, not just repeat OCR text!
+**Critical:** 
+- The visual_description must be 200-400 words and describe EVERYTHING visible in extreme detail
+- This field will be indexed for semantic search, so be specific about positions, colors, counts, and visual features
+- Do NOT just repeat OCR text - focus on VISUAL CONTENT that someone searching for specific page types would need
 
 Respond with ONLY the JSON, no additional text."""
 

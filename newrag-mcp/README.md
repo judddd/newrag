@@ -88,13 +88,27 @@ curl http://localhost:3000/health
 
 ### 1. hybrid_search - 智能混合搜索
 
-向量+BM25混合搜索，自动处理embedding。
+向量+BM25混合搜索，自动处理embedding。适合搜索文本内容。
 
 ### 2. keyword_search - 纯关键词搜索
 
 BM25算法，速度快，适合精确匹配。
 
-### 3. get_document_chunks - 获取完整文档
+### 3. search_by_visual_content - 视觉内容搜索 🆕
+
+基于页面视觉特征的语义搜索。适用于：
+- 查找特定图表类型（电路图、流程图、表格等）
+- 搜索包含特定视觉元素的页面（公章、签名、水印等）
+- 定位特定布局或页面类型
+
+**使用场景：**
+```
+查询: "找包含电路图的页面"
+查询: "搜索有红色公章的文档"
+查询: "查找包含表格的页面"
+```
+
+### 4. get_document_chunks - 获取完整文档
 
 根据document_id获取文档所有页面。
 
