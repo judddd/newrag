@@ -9,3 +9,4 @@ export MCP_HTTP_HOST=localhost
 echo "Starting NewRAG MCP Server..."
 node dist/index.js
 
+

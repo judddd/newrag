@@ -296,14 +296,14 @@ export default function McpPage() {
               </code>
             </div>
           </div>
-
+            
           <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
             <p className="text-sm text-amber-900 dark:text-amber-300 font-medium mb-1">
-              🔐 安全提示
-            </p>
+                🔐 安全提示
+              </p>
             <p className="text-xs text-amber-800 dark:text-amber-400">
               Token 是长期凭证，请妥善保管。为每个设备创建独立 Token，不用时及时删除。
-            </p>
+              </p>
           </div>
         </div>
       </div>
