@@ -358,6 +358,9 @@ Respond with ONLY the JSON, no additional text."""
             # ===== VLM页面分析（新增！）=====
             "page_analysis": {
                 "page_type": page_analysis.get('page_type', 'unknown'),
+                # New format: visual_description (primary field for semantic search)
+                "visual_description": page_analysis.get('visual_description', ''),
+                # Legacy format fields (keep for backward compatibility)
                 "page_description": page_analysis.get('page_description', ''),
                 "visual_elements": page_analysis.get('visual_elements', []),
                 "layout_structure": page_analysis.get('layout_structure', '')
