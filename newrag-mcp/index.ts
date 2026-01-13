@@ -365,11 +365,17 @@ export async function createElasticsearchMcpServer(
 4. 返回最相关的文档片段
 
 使用场景：
-- 查找与问题语义相关的文档
-- 智能问答和知识检索
-- 模糊查询和概念搜索
+- 查找与问题语义相关的文档（例："配电系统保护措施"）
+- 智能问答和知识检索（例："如何设计断路器"）
+- 模糊查询和概念搜索（例："电路保护"能找到"过流保护"）
 
-注意：只需提供查询文本，系统会自动完成向量化和混合搜索。`,
+返回信息包含：
+- 文档完整元数据（文件名、页码、文档ID等）
+- MinIO 存储地址（原始文件URL、页面图片URL）
+- 匹配内容高亮显示
+- 结构化JSON数据（方便程序化处理）
+
+注意：这是默认推荐的搜索工具，适用于大多数场景。`,
     {
       query: z
         .string()
@@ -956,20 +962,34 @@ export async function createElasticsearchMcpServer(
   // 🎨 视觉内容搜索工具
   server.tool(
     "search_by_visual_content",
-    `根据视觉内容描述搜索文档页面（混合搜索：关键词70% + 向量30%）。
-    
-该工具专门搜索 visual_description 字段，基于页面的视觉特征：
-- 查找包含特定图表类型的页面（如"电路图"、"流程图"、"表格"）
-- 搜索有特定视觉元素的页面（如"红色公章"、"签名"、"水印"）
-- 定位特定布局的页面（如"表格在左上角"、"多栏布局"）
-- 查找特定类型的文档页面（如"标题页"、"数据表格页"、"技术图纸"）
+    `根据页面视觉内容和技术细节搜索文档（混合搜索：向量70% + 关键词30%）。
+
+该工具专门搜索 visual_description 字段，该字段包含：
+- **页面视觉特征**：图表类型、布局结构、颜色、视觉元素位置
+- **技术细节内容**：电路元件名称、设备编号、配件型号、技术参数
+- **页面组成元素**：表格、图表、公章、签名、水印、标注
+- **完整描述信息**：页面中所有可见的文字、数字、符号、标识
+
+适用场景（主要用于技术文档）：
+- 电路图/原理图：查找特定元件、电路类型、连接方式
+- 设计图/工程图：定位设备型号、配件编号、技术规格
+- 工业图纸：搜索设备标签、参数表、布局结构
+- 数据表格：查找包含特定数据、参数的表格页面
+- 技术文档：定位包含特定视觉标记的页面（公章、签名等）
 
 搜索策略：
-- 70%: BM25 关键词匹配 visual_description 字段（精确）
-- 30%: 向量语义搜索（辅助，理解相关概念）
+- 70%: 向量语义搜索（理解概念、识别相关内容）
+- 30%: BM25 关键词匹配（精确匹配型号、编号等）
 
-注意：只搜索视觉描述，不搜索文档文本内容。
-如需搜索文档文本内容，请使用 hybrid_search 或 keyword_search。`,
+返回信息包含：
+- 完整文档元数据（文件名、页码、文档ID、图纸编号、项目名称）
+- MinIO 存储地址（原始文件URL、页面图片URL、存储Bucket/Prefix）
+- 页面视觉信息（页面类型、完整视觉描述、技术细节）
+- 文本内容预览
+- 结构化JSON数据（方便程序化处理）
+
+注意：visual_description 包含页面的完整视觉和技术信息，不仅是简单描述。
+如需搜索文档正文文本内容，请使用 hybrid_search。`,
     {
       query: z
         .string()
@@ -1022,7 +1042,19 @@ export async function createElasticsearchMcpServer(
                 { exists: { field: "visual_description" } }
               ],
               should: [
-                // 70%: BM25 关键词搜索 visual_description 字段
+                // 70%: 向量语义搜索（主要）
+                {
+                  script_score: {
+                    query: { match_all: {} },
+                    script: {
+                      source: "cosineSimilarity(params.query_vector, 'content_vector') * 0.7",
+                      params: {
+                        query_vector: queryVector,
+                      },
+                    },
+                  },
+                },
+                // 30%: BM25 关键词搜索 visual_description 字段（辅助）
                 {
                   multi_match: {
                     query: query,
@@ -1031,22 +1063,10 @@ export async function createElasticsearchMcpServer(
                       "page_type^1.5"              // 页面类型
                     ],
                     type: "best_fields",
-                    boost: 0.7,
+                    boost: 0.3,
                     operator: "or",
                     fuzziness: "AUTO"
                   }
-                },
-                // 30%: 向量语义搜索（辅助）
-                {
-                  script_score: {
-                    query: { match_all: {} },
-                    script: {
-                      source: "cosineSimilarity(params.query_vector, 'content_vector') * 0.3",
-                      params: {
-                        query_vector: queryVector,
-                      },
-                    },
-                  },
                 },
               ],
             },
@@ -1104,29 +1124,118 @@ export async function createElasticsearchMcpServer(
           };
         }
 
-        const formattedResults = result.hits.hits.map((hit: any) => {
+        const formattedResults = result.hits.hits.map((hit: any, idx: number) => {
           const source = hit._source || {};
           const metadata = source.metadata || {};
           const highlights = hit.highlight || {};
           const score = hit._score || 0;
 
-          let result = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📄 文档: ${metadata.filename || source.document_name || "未知"}
-📍 页码: ${metadata.page_number || "N/A"}
-📊 页面类型: ${source.page_type || "未知"}
-⭐ 相关度: ${score.toFixed(4)}
-
-🎨 视觉描述:
-${highlights.visual_description ? highlights.visual_description.join("\n...") : source.visual_description || "无视觉描述"}
-`;
-
-          // 如果有文本内容预览，显示前150字符
-          if (source.text) {
-            const preview = source.text.substring(0, 150);
-            result += `\n📝 内容预览: ${preview}${source.text.length > 150 ? "..." : ""}`;
+          let resultText = `\n━━━ 结果 ${idx + 1} (相关度: ${score.toFixed(4)}) ━━━\n`;
+          
+          // 基础文档信息
+          resultText += `🔑 ES文档ID: ${hit._id}\n`;
+          if (metadata.filename) {
+            resultText += `📄 文件名: ${highlights["metadata.filename"] ? highlights["metadata.filename"][0] : metadata.filename}\n`;
+          }
+          if (metadata.page_number) {
+            resultText += `📃 页码: ${metadata.page_number}`;
+            if (metadata.total_pages) {
+              resultText += ` / ${metadata.total_pages}`;
+            }
+            resultText += `\n`;
           }
 
-          return result;
+          // 文档标识信息
+          if (metadata.checksum) {
+            resultText += `#️⃣  Checksum: ${metadata.checksum.substring(0, 16)}...\n`;
+          }
+          if (metadata.document_id) {
+            resultText += `🆔 文档ID: ${metadata.document_id}\n`;
+          }
+
+          // 文档名称和图纸编号
+          if (source.document_name) {
+            resultText += `🏷️  文档名称: ${source.document_name}\n`;
+          }
+          if (source.drawing_number) {
+            resultText += `🔢 图纸编号: ${source.drawing_number}\n`;
+          }
+          if (source.project_name) {
+            resultText += `🏗️  项目名称: ${source.project_name}\n`;
+          }
+
+          // 原始文件URL (重要!)
+          if (metadata.original_file_url) {
+            resultText += `\n📥 原始文件:\n`;
+            resultText += `   URL: ${metadata.original_file_url}\n`;
+            resultText += `   (可直接下载PDF/DOCX等原始文档)\n`;
+          }
+
+          // MinIO图片资源
+          if (metadata.page_image_url) {
+            resultText += `\n📷 页面图片:\n`;
+            resultText += `   URL: ${metadata.page_image_url}\n`;
+          }
+          
+          // MinIO存储信息
+          if (metadata.minio_bucket || metadata.minio_prefix) {
+            resultText += `\n💾 MinIO存储:\n`;
+            if (metadata.minio_bucket) {
+              resultText += `   Bucket: ${metadata.minio_bucket}\n`;
+            }
+            if (metadata.minio_prefix) {
+              resultText += `   Prefix: ${metadata.minio_prefix}\n`;
+            }
+            if (metadata.minio_base_url) {
+              resultText += `   Base URL: ${metadata.minio_base_url}\n`;
+            }
+          }
+
+          // 页面类型和视觉描述
+          resultText += `\n🎨 页面视觉信息:\n`;
+          if (source.page_type) {
+            resultText += `   页面类型: ${source.page_type}\n`;
+          }
+          if (source.visual_description) {
+            const visualDesc = highlights.visual_description 
+              ? highlights.visual_description.join("\n   ") 
+              : (source.visual_description.length > 300 
+                  ? source.visual_description.substring(0, 300) + "..." 
+                  : source.visual_description);
+            resultText += `   视觉描述: ${visualDesc}\n`;
+          }
+
+          // 文本内容预览
+          if (source.text) {
+            resultText += `\n📝 内容预览:\n`;
+            const preview = source.text.length > 200 
+              ? source.text.substring(0, 200) + "..." 
+              : source.text;
+            resultText += preview + "\n";
+          }
+
+          // 返回结构化JSON (方便程序化处理)
+          resultText += `\n📋 结构化数据:\n`;
+          resultText += JSON.stringify({
+            es_id: hit._id,
+            score: hit._score,
+            document_id: metadata.document_id,
+            checksum: metadata.checksum,
+            filename: metadata.filename,
+            page_number: metadata.page_number,
+            total_pages: metadata.total_pages,
+            page_type: source.page_type,
+            visual_description: source.visual_description,
+            original_file_url: metadata.original_file_url,
+            page_image_url: metadata.page_image_url,
+            minio_bucket: metadata.minio_bucket,
+            minio_prefix: metadata.minio_prefix,
+            minio_base_url: metadata.minio_base_url,
+            drawing_number: source.drawing_number,
+            project_name: source.project_name,
+          }, null, 2) + "\n";
+
+          return resultText;
         });
 
         return {
@@ -1136,7 +1245,7 @@ ${highlights.visual_description ? highlights.visual_description.join("\n...") : 
               text: `🎨 视觉内容搜索结果 (查询: "${query}")
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 找到 ${result.hits.hits.length} 个相关页面
-搜索策略: visual_description 关键词(70%) + 向量语义(30%)
+搜索策略: 向量语义(70%) + visual_description 关键词(30%)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ${formattedResults.join("\n\n")}`,

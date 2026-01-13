@@ -70,21 +70,38 @@ class VLMRefiner:
 
 **Your Analysis Must Include:**
 
-1. **Detailed Visual Description** (CRITICAL for Visual Content Search!)
-   **Write a comprehensive 200-400 word description covering:**
-   - **Layout & Structure:** Page orientation, columns, sections, header/footer, spatial organization
-   - **Visual Elements (count & location):** Tables (how many, where located), diagrams (type, complexity, position), charts, photos, stamps, logos, signatures, borders
-   - **Colors & Styling:** Dominant colors, highlighting, color-coded elements, backgrounds, font sizes
-   - **Text Layout:** Font hierarchy, text density, alignment, headings structure
-   - **Page Type & Purpose:** What kind of page is this? (title page / data table / technical diagram / form / invoice / resume / contract / mixed)
-   - **Unique Features:** Watermarks, annotations, handwritten notes, quality issues, distinguishing characteristics
+1. **Detailed Visual Description** (CRITICAL for Technical Document Search!)
+   **Write a comprehensive 200-400 word description including ALL visible information:**
    
-   **This description will be used for SEMANTIC SEARCH queries like:**
-   - "Find pages with circuit diagrams"
-   - "Search for documents with red stamps"
-   - "Locate pages with tables in the upper-left corner"
+   **A. Visual Structure & Layout:**
+   - Page orientation, columns, sections, header/footer, spatial organization
+   - Visual elements count & location: Tables (how many, where), diagrams (type, position), charts, photos, stamps, logos, signatures, borders
+   - Colors & styling: Dominant colors, highlighting, color-coded elements, backgrounds
+   - Text layout: Font hierarchy, density, alignment, headings structure
    
-   **Be extremely detailed and specific!**
+   **B. Technical Details & Content (MUST INCLUDE):**
+   - **Component names & part numbers:** "resistor R1", "capacitor C5", "IC chip U2", etc.
+   - **Equipment/device IDs:** Model numbers, serial numbers, product codes visible in the page
+   - **Technical parameters:** Voltage ratings, dimensions, specifications, measurements
+   - **Labels & identifiers:** Any alphanumeric codes, reference designators, catalog numbers
+   - **Text content:** Key visible text, titles, headings, annotations, captions
+   - **Symbols & notations:** Engineering symbols, mathematical notations, unit symbols
+   
+   **C. Page Type & Purpose:**
+   - What kind of page: title page / data table / circuit diagram / wiring diagram / mechanical drawing / form / specification sheet / mixed
+   - Document purpose: Technical manual, design specification, assembly instruction, etc.
+   
+   **D. Unique Features:**
+   - Watermarks, annotations, handwritten notes, stamps (color, position)
+   - Quality issues, distinguishing characteristics
+   
+   **This description will be used for TECHNICAL SEARCHES like:**
+   - "Find pages with circuit diagram containing IC U2"
+   - "Search for wiring diagrams with connector J1"
+   - "Locate specifications for model XYZ-123"
+   - "Find pages with red approval stamps"
+   
+   **CRITICAL: Include ALL visible part numbers, model codes, and technical identifiers!**
 
 2. **Content Understanding**
    - Fix OCR errors (e.g., "4-AU9-25" → "4-Aug-25", "伛 SeP 3" → "15-Sep-25")
@@ -104,7 +121,7 @@ Respond ONLY with a valid JSON object:
   "page_analysis": {{
     "page_number": {page_number},
     "page_type": "title_page | data_table | diagram | text_content | form | mixed",
-    "visual_description": "200-400 words DETAILED description of EVERYTHING visible: layout structure, colors, visual elements with counts and locations, text hierarchy, spatial organization, watermarks, stamps, logos, diagrams details, table positions, unique visual features, etc. Be extremely specific for semantic search.",
+    "visual_description": "200-400 words COMPLETE description including: 1) Visual layout (structure, colors, element positions, counts); 2) ALL technical details (part numbers like 'R1', 'U2', model codes, device IDs, specifications, measurements); 3) Visible text (titles, labels, annotations, identifiers); 4) Page type & purpose; 5) Unique features (stamps, watermarks, handwritten notes). CRITICAL: Include ALL part numbers, model codes, and technical identifiers visible in the page. This field is used for searching technical documents by visual content AND technical details.",
     "visual_elements": ["table", "diagram", "stamp", "logo", "photo", "chart", "signature", "border", "watermark", "annotation"]
   }},
   
@@ -137,10 +154,13 @@ Respond ONLY with a valid JSON object:
 }}
 ```
 
-**Critical:** 
-- The visual_description must be 200-400 words and describe EVERYTHING visible in extreme detail
-- This field will be indexed for semantic search, so be specific about positions, colors, counts, and visual features
-- Do NOT just repeat OCR text - focus on VISUAL CONTENT that someone searching for specific page types would need
+**Critical Requirements:** 
+- The visual_description MUST be 200-400 words and describe EVERYTHING visible
+- MUST include ALL technical identifiers: part numbers (R1, C5, U2), model codes, device IDs, specifications
+- This field is used for searching technical documents (circuit diagrams, engineering drawings, specifications)
+- Include both VISUAL features (layout, colors, element positions) AND TECHNICAL content (part names, numbers, parameters)
+- Be specific about positions, colors, counts, and distinguishing characteristics
+- DO NOT just repeat OCR text - synthesize visual AND technical information into a comprehensive description
 
 Respond with ONLY the JSON, no additional text."""
 
