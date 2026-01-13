@@ -54,6 +54,12 @@
         "index": true,
         "similarity": "cosine"
       },
+      "description_vector": {
+        "type": "dense_vector",
+        "dims": 2560,
+        "index": true,
+        "similarity": "cosine"
+      },
       "chunk_id": {
         "type": "keyword"
       },

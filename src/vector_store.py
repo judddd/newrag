@@ -149,6 +149,7 @@ class VectorStore:
         # Fields to promote from metadata to top level
         fields_to_promote = [
             'visual_description',
+            'description_vector',
             'page_type',
             'drawing_number',
             'project_name',
@@ -336,6 +337,29 @@ class VectorStore:
                 )
                 raise
             
+            # Generate description_vector for documents with visual_description
+            logger.info("🔄 Generating description vectors for visual_description fields...")
+            description_vectors_generated = 0
+            for doc in valid_documents:
+                visual_desc = doc.metadata.get('visual_description', '').strip()
+                if visual_desc:
+                    try:
+                        # Generate embedding for visual_description
+                        desc_vector = self.embedding_model.embed_query(visual_desc)
+                        doc.metadata['description_vector'] = desc_vector
+                        description_vectors_generated += 1
+                    except Exception as vec_error:
+                        logger.warning(
+                            "failed_to_generate_description_vector",
+                            error=str(vec_error),
+                            visual_desc_length=len(visual_desc)
+                        )
+            logger.info(
+                "✅ Description vector generation complete",
+                generated=description_vectors_generated,
+                total_docs=len(valid_documents)
+            )
+            
             # Add documents in batches
             ids = []
             total_batches = (len(valid_documents) + batch_size - 1) // batch_size
@@ -348,7 +372,8 @@ class VectorStore:
                     "📋 Sample document to be indexed:",
                     content_length=len(sample_doc.page_content),
                     content_preview=sample_doc.page_content[:150],
-                    metadata_keys=list(sample_doc.metadata.keys()) if hasattr(sample_doc, 'metadata') else []
+                    metadata_keys=list(sample_doc.metadata.keys()) if hasattr(sample_doc, 'metadata') else [],
+                    has_description_vector=('description_vector' in sample_doc.metadata)
                 )
             
             for i in range(0, len(valid_documents), batch_size):

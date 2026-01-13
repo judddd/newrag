@@ -353,15 +353,15 @@ export async function createElasticsearchMcpServer(
 
   // 工具1: 智能混合搜索 (向量 + BM25)
   // 该工具会自动将用户的查询文本转换为向量，并执行混合搜索
-  // 大模型只需提供搜索关键词，无需关心embedding细节
+  // 工具1: 搜索实际文本内容
   server.tool(
-    "hybrid_search",
-    `搜索文档内容（向量70% + 关键词30%）。
+    "search_content",
+    `搜索文档页面的实际文本内容（向量70% + BM25 30%）。
 
 适用场景：
-- 概念/语义查询："配电系统保护措施"、"如何设计断路器"
-- 模糊搜索：能理解同义词和相关概念
-- **默认选择**，适用于大多数搜索需求
+- 查找文档中的实际文字、数据、说明
+- 概念/语义查询："配电系统保护措施"
+- 技术内容查询："断路器设计方法"
 
 返回：完整元数据、MinIO地址、匹配内容高亮`,
     {
@@ -675,15 +675,15 @@ export async function createElasticsearchMcpServer(
         });
 
         const summary = `
-🔍 混合搜索完成
+🔍 内容搜索完成 (search_content)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 查询: "${query}"
 索引: ${targetIndex}
 总结果数: ${totalHits}
 返回数量: ${result.hits.hits.length}
-搜索策略: 向量搜索(${(vectorWeight * 100).toFixed(0)}%) + BM25关键词(${(
+搜索策略: 向量(text)${(vectorWeight * 100).toFixed(0)}% + BM25(text)${(
           bm25Weight * 100
-        ).toFixed(0)}%)
+        ).toFixed(0)}%
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 `;
 
@@ -944,18 +944,17 @@ export async function createElasticsearchMcpServer(
     }
   );
 
-  // 🎨 视觉内容搜索工具
+  // 工具2: 搜索页面完整描述
   server.tool(
-    "search_by_visual_content",
-    `搜索页面视觉特征和技术细节（向量70% + 关键词30%）。
+    "search_description",
+    `搜索页面完整描述内容（向量70% + BM25 30%）。
 
 适用场景：
-- 查找图表类型："包含电路图的页面"、"有流程图"
-- 查找技术细节："电路图包含IC U2"、"设备型号XYZ-123"
-- 查找视觉元素："有红色公章"、"表格在左上角"
-- 主要用于：电路图、设计图、工程图、技术图纸
+- 查找页面视觉特征："包含电路图"、"有红色公章"
+- 查找技术细节："电路图包含IC U2"、"设备型号XYZ-123"  
+- 查找页面布局："表格在左上角"、"多栏布局"
 
-返回：完整元数据、MinIO地址、视觉描述、技术细节`,
+常与 search_content 配合使用`,
     {
       query: z
         .string()
@@ -1004,16 +1003,17 @@ export async function createElasticsearchMcpServer(
             bool: {
               must: [
                 permissionFilter,
-                // 必须有 visual_description 字段
-                { exists: { field: "visual_description" } }
+                // 必须有 visual_description 和 description_vector 字段
+                { exists: { field: "visual_description" } },
+                { exists: { field: "description_vector" } }
               ],
               should: [
-                // 70%: 向量语义搜索（主要）
+                // 70%: 向量语义搜索 description_vector（主要）
                 {
                   script_score: {
                     query: { match_all: {} },
                     script: {
-                      source: "cosineSimilarity(params.query_vector, 'content_vector') * 0.7",
+                      source: "cosineSimilarity(params.query_vector, 'description_vector') * 0.7",
                       params: {
                         query_vector: queryVector,
                       },
@@ -1208,10 +1208,11 @@ export async function createElasticsearchMcpServer(
           content: [
             {
               type: "text" as const,
-              text: `🎨 视觉内容搜索结果 (查询: "${query}")
+              text: `📄 描述搜索完成 (search_description)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-找到 ${result.hits.hits.length} 个相关页面
-搜索策略: 向量语义(70%) + visual_description 关键词(30%)
+查询: "${query}"
+总结果数: ${result.hits.hits.length}
+搜索策略: 向量(description_vector)70% + BM25(visual_description)30%
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ${formattedResults.join("\n\n")}`,
