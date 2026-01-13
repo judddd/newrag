@@ -34,7 +34,7 @@ from web.routes.auth_routes import router as auth_router
 from web.routes.admin_routes import router as admin_router
 from web.handlers import extract_matched_bboxes_from_file
 from web.middleware.auth import AuthMiddleware
-from web.dependencies.auth_deps import get_optional_user
+from web.dependencies.auth_deps import get_optional_user, get_current_user
 from src.database import User
 
 # Initialize logging with configuration from config.yaml
