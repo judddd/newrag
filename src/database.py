@@ -913,6 +913,7 @@ class DatabaseManager:
             completed = base_query.filter(Document.status == 'completed').count()
             failed = base_query.filter(Document.status == 'failed').count()
             processing = base_query.filter(Document.status == 'processing').count()
+            queued = base_query.filter(Document.status == 'queued').count()
             
             # Calculate total pages across filtered documents
             from sqlalchemy import func
@@ -926,6 +927,7 @@ class DatabaseManager:
                 'completed': completed,
                 'failed': failed,
                 'processing': processing,
+                'queued': queued,
                 'total_pages': total_pages
             }
         finally:

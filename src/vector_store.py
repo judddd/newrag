@@ -86,11 +86,21 @@ class VectorStore:
             List of filter clauses for ES bool query
         """
         if is_superuser:
-            # Superuser with org filter: only show docs from that org
-            if org_id is not None:
-                return [{"term": {"metadata.org_id": org_id}}]
             # Superuser without org filter: sees everything, no filter needed
-            return []
+            if org_id is None:
+                return []
+            
+            # Superuser with org filter: show docs from that org OR legacy docs without org_id
+            return [{
+                "bool": {
+                    "should": [
+                        {"term": {"metadata.org_id": org_id}},
+                        # Legacy documents without org_id field (treat as accessible)
+                        {"bool": {"must_not": {"exists": {"field": "metadata.org_id"}}}}
+                    ],
+                    "minimum_should_match": 1
+                }
+            }]
         
         # Build OR conditions for permissions
         should_clauses = [

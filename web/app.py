@@ -355,6 +355,7 @@ async def get_stats(user: User = Depends(get_current_user)):
             'documents_by_status': {
                 'completed': db_stats.get('completed', 0),
                 'processing': db_stats.get('processing', 0),
+                'queued': db_stats.get('queued', 0),
                 'failed': db_stats.get('failed', 0)
             },
             
