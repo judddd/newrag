@@ -948,31 +948,38 @@ class VectorStore:
             logger.error("delete_failed", error=str(e), filter=filter_dict)
             raise
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(
+        self,
+        user_id: Optional[int] = None,
+        org_id: Optional[int] = None,
+        is_superuser: bool = False
+    ) -> Dict[str, Any]:
         """
-        Get index statistics
+        Get index statistics (filtered by user permissions)
         
+        Args:
+            user_id: User ID for permission filtering
+            org_id: Organization ID for permission filtering
+            is_superuser: Whether the user is a superuser
+            
         Returns:
-            Dictionary containing index stats
+            Dictionary containing index stats with actual document count
         """
         try:
             # Check if index exists
             if not self.es_client.indices.exists(index=self.index_name):
                 return {
                     'document_count': 0,
+                    'chunk_count': 0,
                     'index_size_bytes': 0,
                     'categories': [],
                     'file_types': []
                 }
             
-            # Get document count
-            try:
-                count_response = self.es_client.count(index=self.index_name)
-                doc_count = count_response['count']
-            except Exception:
-                doc_count = 0
+            # Build permission filter
+            permission_filter = self.build_permission_filter(user_id, org_id, is_superuser)
             
-            # Get index stats
+            # Get index stats (total size, not filtered)
             try:
                 stats = self.es_client.indices.stats(index=self.index_name)
                 index_stats = stats['indices'][self.index_name]
@@ -980,43 +987,61 @@ class VectorStore:
             except Exception:
                 size_bytes = 0
             
-            # Get aggregations for categories (try both with and without metadata prefix)
-            categories = []
-            file_types = []
-            
-            if doc_count > 0:
-                try:
-                    agg_query = {
-                        "size": 0,
-                        "aggs": {
-                            "categories": {
-                                "terms": {"field": "metadata.category", "size": 10, "missing": "uncategorized"}
-                            },
-                            "file_types": {
-                                "terms": {"field": "metadata.file_type", "size": 10, "missing": "unknown"}
-                            }
-                        }
+            # Build aggregation query with permission filter
+            agg_query = {
+                "size": 0,
+                "query": {
+                    "bool": {
+                        "must": permission_filter if permission_filter else []
                     }
-                    
-                    agg_response = self.es_client.search(
-                        index=self.index_name,
-                        body=agg_query
-                    )
-                    
-                    categories = [
-                        {'name': b['key'], 'count': b['doc_count']}
-                        for b in agg_response['aggregations']['categories']['buckets']
-                    ]
-                    
-                    file_types = [
-                        {'name': b['key'], 'count': b['doc_count']}
-                        for b in agg_response['aggregations']['file_types']['buckets']
-                    ]
-                except Exception as e:
-                    logger.warning("aggregation_failed", error=str(e))
+                },
+                "aggs": {
+                    "unique_documents": {
+                        "cardinality": {
+                            "field": "metadata.document_id"  # 统计唯一文档数
+                        }
+                    },
+                    "categories": {
+                        "terms": {"field": "metadata.category", "size": 10, "missing": "uncategorized"}
+                    },
+                    "file_types": {
+                        "terms": {"field": "metadata.file_type", "size": 10, "missing": "unknown"}
+                    }
+                }
+            }
+            
+            # Get counts and aggregations
+            try:
+                agg_response = self.es_client.search(
+                    index=self.index_name,
+                    body=agg_query
+                )
+                
+                # Chunk count (total hits matching permission filter)
+                chunk_count = agg_response['hits']['total']['value']
+                
+                # Document count (unique document_id count via cardinality)
+                doc_count = agg_response['aggregations']['unique_documents']['value']
+                
+                categories = [
+                    {'name': b['key'], 'count': b['doc_count']}
+                    for b in agg_response['aggregations']['categories']['buckets']
+                ]
+                
+                file_types = [
+                    {'name': b['key'], 'count': b['doc_count']}
+                    for b in agg_response['aggregations']['file_types']['buckets']
+                ]
+            except Exception as e:
+                logger.warning("aggregation_failed", error=str(e))
+                chunk_count = 0
+                doc_count = 0
+                categories = []
+                file_types = []
             
             return {
-                'document_count': doc_count,
+                'document_count': doc_count,      # 真实文档数（去重）
+                'chunk_count': chunk_count,        # chunk 数量
                 'index_size_bytes': size_bytes,
                 'categories': categories,
                 'file_types': file_types
@@ -1027,6 +1052,7 @@ class VectorStore:
             # Return empty stats instead of raising
             return {
                 'document_count': 0,
+                'chunk_count': 0,
                 'index_size_bytes': 0,
                 'categories': [],
                 'file_types': []

@@ -284,20 +284,28 @@ async def search_component(component_id: str, k: int = 10):
 
 
 @app.get("/stats")
-async def get_stats():
+async def get_stats(user: User = Depends(get_current_user)):
     """
-    Get knowledge base statistics
+    Get knowledge base statistics (filtered by user permissions)
     """
     try:
         # Get ES stats (fail gracefully if ES is down)
         try:
-            es_stats = pipeline.vector_store.get_stats()
+            es_stats = pipeline.vector_store.get_stats(
+                user_id=user.id,
+                org_id=user.org_id,
+                is_superuser=user.is_superuser
+            )
         except Exception as e:
             logger.warning("es_stats_unavailable", error=str(e))
             es_stats = {'document_count': 0, 'file_types': []}
 
         # Get database stats
-        db_stats = db.get_stats()
+        db_stats = db.get_stats(
+            user_id=user.id,
+            org_id=user.org_id,
+            is_superuser=user.is_superuser
+        )
         
         # Get MinIO storage stats
         from src.minio_storage import minio_storage

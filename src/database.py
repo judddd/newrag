@@ -883,18 +883,42 @@ class DatabaseManager:
             finally:
                 session.close()
     
-    def get_stats(self):
-        """Get database statistics"""
+    def get_stats(
+        self,
+        user_id: Optional[int] = None,
+        org_id: Optional[int] = None,
+        is_superuser: bool = False
+    ):
+        """
+        Get database statistics (filtered by user permissions)
+        
+        Args:
+            user_id: User ID for permission filtering
+            org_id: Organization ID for permission filtering
+            is_superuser: Whether the user is a superuser
+            
+        Returns:
+            Statistics dictionary with counts
+        """
         session = self.get_session()
         try:
-            total = session.query(Document).count()
-            completed = session.query(Document).filter(Document.status == 'completed').count()
-            failed = session.query(Document).filter(Document.status == 'failed').count()
-            processing = session.query(Document).filter(Document.status == 'processing').count()
+            # Build base query with permission filter
+            base_query = session.query(Document)
+            base_query = self.apply_permission_filter(
+                base_query, user_id, org_id, is_superuser
+            )
             
-            # Calculate total pages across all documents
+            # Get counts
+            total = base_query.count()
+            completed = base_query.filter(Document.status == 'completed').count()
+            failed = base_query.filter(Document.status == 'failed').count()
+            processing = base_query.filter(Document.status == 'processing').count()
+            
+            # Calculate total pages across filtered documents
             from sqlalchemy import func
-            total_pages_result = session.query(func.sum(Document.total_pages)).scalar()
+            total_pages_result = base_query.with_entities(
+                func.sum(Document.total_pages)
+            ).scalar()
             total_pages = total_pages_result or 0
             
             return {
