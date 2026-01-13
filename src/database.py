@@ -1417,13 +1417,13 @@ class DatabaseManager:
     def count_documents_by_org(self, org_id: int) -> int:
         """
         Count total documents for an organization.
-        Counts DocumentMaster records (versioned architecture).
+        Counts Document records (current architecture).
         """
         session = self.get_session()
         try:
-            # Count versioned documents (DocumentMaster)
-            count = session.query(DocumentMaster).filter(
-                DocumentMaster.org_id == org_id
+            # Count documents in current architecture
+            count = session.query(Document).filter(
+                Document.org_id == org_id
             ).count()
             
             return count
