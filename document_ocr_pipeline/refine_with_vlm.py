@@ -228,15 +228,12 @@ Respond with ONLY the JSON, no additional text."""
                 print("   (This may take a while for vision models...)")
             
             try:
-                # 调整 temperature：重试时稍微降低以获得更确定的输出
-                temperature = 0.1 - (retry * 0.02)  # 0.1 -> 0.08 -> 0.06
-                
-                # 调用模型
+                # 调用模型（保持固定 temperature）
                 response = self.client.chat.completions.create(
                     model=model if model else "local-model",
                     messages=messages,
                     max_tokens=4096,
-                    temperature=temperature,
+                    temperature=0.1,
                 )
                 
                 content = response.choices[0].message.content
