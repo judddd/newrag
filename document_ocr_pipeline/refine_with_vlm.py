@@ -216,67 +216,114 @@ Respond with ONLY the JSON, no additional text."""
             }
         ]
         
-        print("🤖 Calling VLM model...")
-        print("   (This may take a while for vision models...)")
+        # 重试逻辑：最多尝试 3 次
+        max_retries = 3
+        last_error = None
         
-        try:
-            # 调用模型
-            response = self.client.chat.completions.create(
-                model=model if model else "local-model",
-                messages=messages,
-                max_tokens=4096,
-                temperature=0.1,
-            )
-            
-            content = response.choices[0].message.content
-            print("✓ Model response received")
-            
-            # 解析JSON响应（增强鲁棒性）
-            json_start = content.find("{")
-            json_end = content.rfind("}") + 1
-            
-            if json_start != -1 and json_end > json_start:
-                json_str = content[json_start:json_end]
-                
-                # 尝试多种解析策略
-                for attempt in range(3):
-                    try:
-                        if attempt == 0:
-                            # 直接解析
-                            refined_data = json.loads(json_str)
-                        elif attempt == 1:
-                            # 修复常见的转义问题：将单个反斜杠替换为双反斜杠（除了已经正确转义的）
-                            import re
-                            # 保护已经正确转义的字符
-                            fixed_json = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', json_str)
-                            refined_data = json.loads(fixed_json)
-                            print("   ℹ️  Fixed invalid escape sequences")
-                        elif attempt == 2:
-                            # 使用strict=False模式
-                            refined_data = json.loads(json_str, strict=False)
-                            print("   ℹ️  Parsed with strict=False mode")
-                        
-                        # 解析成功
-                        return refined_data
-                        
-                    except json.JSONDecodeError as e:
-                        if attempt < 2:
-                            continue  # 尝试下一个策略
-                        else:
-                            # 所有策略都失败，记录详细错误
-                            print(f"⚠️  JSON parse failed after {attempt+1} attempts: {e}")
-                            print(f"   Error position: line {e.lineno}, column {e.colno}")
-                            print(f"   Problematic section: ...{json_str[max(0,e.pos-50):e.pos+50]}...")
-                            raise ValueError(f"Failed to parse VLM JSON response: {e}")
+        for retry in range(max_retries):
+            if retry > 0:
+                print(f"\n🔄 Retry {retry}/{max_retries}...")
             else:
-                raise ValueError("No valid JSON found in model response")
+                print("🤖 Calling VLM model...")
+                print("   (This may take a while for vision models...)")
             
-            return refined_data
-            
-        except Exception as e:
-            print(f"⚠️  Error calling VLM model: {e}")
-            print("   Falling back to text-only refinement...")
-            return self.refine_text_only(ocr_data, model)
+            try:
+                # 调整 temperature：重试时稍微降低以获得更确定的输出
+                temperature = 0.1 - (retry * 0.02)  # 0.1 -> 0.08 -> 0.06
+                
+                # 调用模型
+                response = self.client.chat.completions.create(
+                    model=model if model else "local-model",
+                    messages=messages,
+                    max_tokens=4096,
+                    temperature=temperature,
+                )
+                
+                content = response.choices[0].message.content
+                print("✓ Model response received")
+                
+                # 解析JSON响应（增强鲁棒性）
+                json_start = content.find("{")
+                json_end = content.rfind("}") + 1
+                
+                if json_start != -1 and json_end > json_start:
+                    json_str = content[json_start:json_end]
+                    
+                    # 尝试多种解析策略
+                    for parse_attempt in range(3):
+                        try:
+                            if parse_attempt == 0:
+                                # 直接解析
+                                refined_data = json.loads(json_str)
+                            elif parse_attempt == 1:
+                                # 修复常见的转义问题：将单个反斜杠替换为双反斜杠（除了已经正确转义的）
+                                import re
+                                # 保护已经正确转义的字符
+                                fixed_json = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', json_str)
+                                refined_data = json.loads(fixed_json)
+                                print("   ℹ️  Fixed invalid escape sequences")
+                            elif parse_attempt == 2:
+                                # 使用strict=False模式
+                                refined_data = json.loads(json_str, strict=False)
+                                print("   ℹ️  Parsed with strict=False mode")
+                            
+                            # 解析成功！
+                            if retry > 0:
+                                print(f"✅ Successfully parsed JSON after {retry + 1} attempt(s)")
+                            return refined_data
+                            
+                        except json.JSONDecodeError as e:
+                            if parse_attempt < 2:
+                                continue  # 尝试下一个解析策略
+                            else:
+                                # 所有解析策略都失败
+                                error_msg = f"JSON parse failed: {e}"
+                                if retry < max_retries - 1:
+                                    print(f"⚠️  {error_msg} - will retry")
+                                    print(f"   Error position: line {e.lineno}, column {e.colno}")
+                                    last_error = ValueError(f"Failed to parse VLM JSON response: {e}")
+                                    break  # 跳出解析循环，进入下一次重试
+                                else:
+                                    # 这是最后一次尝试
+                                    print(f"❌ {error_msg} after {max_retries} attempts")
+                                    print(f"   Error position: line {e.lineno}, column {e.colno}")
+                                    print(f"   Problematic section: ...{json_str[max(0,e.pos-50):e.pos+50]}...")
+                                    raise ValueError(f"Failed to parse VLM JSON response after {max_retries} retries: {e}")
+                else:
+                    error_msg = "No valid JSON found in model response"
+                    if retry < max_retries - 1:
+                        print(f"⚠️  {error_msg} - will retry")
+                        last_error = ValueError(error_msg)
+                        continue  # 重试
+                    else:
+                        raise ValueError(f"{error_msg} after {max_retries} attempts")
+                
+            except ValueError as e:
+                # JSON 解析相关错误，继续重试
+                last_error = e
+                if retry == max_retries - 1:
+                    # 最后一次重试也失败了
+                    print(f"\n⚠️  VLM model failed after {max_retries} attempts: {e}")
+                    print("   Falling back to text-only refinement...")
+                    return self.refine_text_only(ocr_data, model)
+                continue
+                
+            except Exception as e:
+                # 其他错误（如网络、API错误）
+                if retry < max_retries - 1:
+                    print(f"⚠️  Error calling VLM model: {e} - will retry")
+                    last_error = e
+                    continue
+                else:
+                    # 最后一次重试也失败了
+                    print(f"\n⚠️  VLM model failed after {max_retries} attempts: {e}")
+                    print("   Falling back to text-only refinement...")
+                    return self.refine_text_only(ocr_data, model)
+        
+        # 不应该到达这里，但以防万一
+        print(f"\n⚠️  All {max_retries} retry attempts exhausted")
+        print("   Falling back to text-only refinement...")
+        return self.refine_text_only(ocr_data, model)
     
     def refine_text_only(self, ocr_data: Dict[str, Any], model: str = None) -> Dict[str, Any]:
         """
