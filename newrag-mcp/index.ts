@@ -895,10 +895,10 @@ export async function createElasticsearchMcpServer(
         });
 
         if (result.hits.hits.length === 0) {
-          return {
-            content: [
-              {
-                type: "text" as const,
+        return {
+          content: [
+            {
+              type: "text" as const,
                 text: `❌ 未找到文档ID: ${document_id}`,
               },
             ],
@@ -956,15 +956,19 @@ export async function createElasticsearchMcpServer(
   // 🎨 视觉内容搜索工具
   server.tool(
     "search_by_visual_content",
-    `根据视觉内容描述搜索文档页面。
+    `根据视觉内容描述搜索文档页面（混合搜索：关键词70% + 向量30%）。
     
-该工具专门用于基于页面的视觉特征进行搜索，而非文本内容。适用于：
+该工具专门搜索 visual_description 字段，基于页面的视觉特征：
 - 查找包含特定图表类型的页面（如"电路图"、"流程图"、"表格"）
 - 搜索有特定视觉元素的页面（如"红色公章"、"签名"、"水印"）
 - 定位特定布局的页面（如"表格在左上角"、"多栏布局"）
 - 查找特定类型的文档页面（如"标题页"、"数据表格页"、"技术图纸"）
 
-注意：此工具使用语义向量搜索 visual_description 字段，适合视觉内容查询。
+搜索策略：
+- 70%: BM25 关键词匹配 visual_description 字段（精确）
+- 30%: 向量语义搜索（辅助，理解相关概念）
+
+注意：只搜索视觉描述，不搜索文档文本内容。
 如需搜索文档文本内容，请使用 hybrid_search 或 keyword_search。`,
     {
       query: z
@@ -1007,24 +1011,37 @@ export async function createElasticsearchMcpServer(
         // 构建权限过滤
         const permissionFilter = buildPermissionFilter(user);
 
-        // 仅对 visual_description 字段进行向量搜索
+        // 混合搜索 visual_description 字段（关键词 + 向量）
         const searchBody: any = {
           size,
           query: {
             bool: {
               must: [
                 permissionFilter,
+                // 必须有 visual_description 字段
+                { exists: { field: "visual_description" } }
+              ],
+              should: [
+                // 70%: BM25 关键词搜索 visual_description 字段
+                {
+                  multi_match: {
+                    query: query,
+                    fields: [
+                      "visual_description^3",      // 视觉描述（最高权重）
+                      "page_type^1.5"              // 页面类型
+                    ],
+                    type: "best_fields",
+                    boost: 0.7,
+                    operator: "or",
+                    fuzziness: "AUTO"
+                  }
+                },
+                // 30%: 向量语义搜索（辅助）
                 {
                   script_score: {
-                    query: { 
-                      bool: {
-                        must: [
-                          { exists: { field: "visual_description" } }
-                        ]
-                      }
-                    },
+                    query: { match_all: {} },
                     script: {
-                      source: "cosineSimilarity(params.query_vector, 'content_vector') + 1.0",
+                      source: "cosineSimilarity(params.query_vector, 'content_vector') * 0.3",
                       params: {
                         query_vector: queryVector,
                       },
@@ -1077,10 +1094,10 @@ export async function createElasticsearchMcpServer(
         process.stderr.write(`✓ Found ${result.hits.hits.length} results\n`);
 
         if (result.hits.hits.length === 0) {
-          return {
-            content: [
-              {
-                type: "text" as const,
+        return {
+          content: [
+            {
+              type: "text" as const,
                 text: `❌ 未找到匹配的视觉内容: "${query}"`,
               },
             ],
@@ -1117,7 +1134,10 @@ ${highlights.visual_description ? highlights.visual_description.join("\n...") : 
             {
               type: "text" as const,
               text: `🎨 视觉内容搜索结果 (查询: "${query}")
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 找到 ${result.hits.hits.length} 个相关页面
+搜索策略: visual_description 关键词(70%) + 向量语义(30%)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ${formattedResults.join("\n\n")}`,
             },
