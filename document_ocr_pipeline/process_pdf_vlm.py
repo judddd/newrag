@@ -44,7 +44,12 @@ def should_use_vlm_refinement(ocr_data: Dict[str, Any]) -> Tuple[bool, str, Dict
     text_blocks = ocr_data.get('text_blocks', [])
     
     if not text_blocks:
-        return False, "无文本内容", {}
+        return False, "无文本内容", {
+            'avg_confidence': 0.0,
+            'garbled_ratio': 0.0,
+            'total_blocks': 0,
+            'total_chars': 0
+        }
     
     # 统计分析
     confidences = [b.get('confidence', 0) for b in text_blocks if b.get('confidence', 0) > 0]
@@ -272,11 +277,24 @@ def process_pdf_page_with_vlm(
                        original_len=len(original_text),
                        refined_len=len(final_text))
     
+    # Try to load VLM JSON data (which contains page_analysis)
+    page_number = page_image_path.stem.split('_')[1]  # Extract page number from filename
+    vlm_json_path = output_dir / f"page_{page_number}_vlm.json"
+    vlm_json_data = None
+    
+    if vlm_json_path.exists():
+        try:
+            with open(vlm_json_path, 'r', encoding='utf-8') as f:
+                vlm_json_data = json.load(f)
+        except Exception as e:
+            logger.warning(f"  ⚠️  Failed to load VLM JSON: {e}")
+    
     return {
         'text': final_text,
         'vlm_refined': vlm_refined,
         'stats': stats,
-        'reason': reason
+        'reason': reason,
+        'vlm_json': vlm_json_data  # Include full VLM JSON data
     }
 
 
@@ -381,11 +399,11 @@ def main():
         if 'statistics' not in page:
             page['statistics'] = {}
         
-        page['statistics']['avg_ocr_confidence'] = vlm_result['stats']['avg_confidence']
+        page['statistics']['avg_ocr_confidence'] = vlm_result['stats'].get('avg_confidence', 0.0)
         page['statistics']['vlm_refined'] = vlm_result['vlm_refined']
         
         # 构建索引文档（标准格式，兼容 document_processor.py）
-        pages_for_index.append({
+        page_data = {
             'page_number': page_num,
             'image_path': str(page_image_path),
             'image_filename': image_filename,
@@ -401,10 +419,17 @@ def main():
             'metadata': {
                 'extraction_method': 'ocr_vlm_refined' if vlm_result['vlm_refined'] else 'ocr',
                 'ocr_engine': args.ocr_engine,
-                'avg_ocr_confidence': vlm_result['stats']['avg_confidence'],
+                'avg_ocr_confidence': vlm_result['stats'].get('avg_confidence', 0.0),
                 'vlm_refined': vlm_result['vlm_refined']
             }
-        })
+        }
+        
+        # Include page_analysis from VLM JSON if available
+        if vlm_result.get('vlm_json') and 'page_analysis' in vlm_result['vlm_json']:
+            page_data['page_analysis'] = vlm_result['vlm_json']['page_analysis']
+            logger.info(f"  ✅ 包含 page_analysis 数据")
+        
+        pages_for_index.append(page_data)
     
     # 保存更新后的 complete_adaptive_ocr.json
     with open(complete_json, 'w', encoding='utf-8') as f:
