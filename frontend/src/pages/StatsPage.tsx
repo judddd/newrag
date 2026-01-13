@@ -132,13 +132,11 @@ export default function StatsPage() {
                   <div className={`w-2.5 h-2.5 rounded-full ${
                     status === 'completed' ? 'bg-emerald-500' : 
                     status === 'processing' ? 'bg-amber-500 animate-pulse' : 
-                    status === 'queued' ? 'bg-blue-500' : 
                     'bg-rose-500'
                   }`}></div>
                   <span className="text-sm font-medium text-slate-700 dark:text-slate-300 capitalize">
                     {status === 'completed' ? 'Completed' : 
                      status === 'processing' ? 'Processing' : 
-                     status === 'queued' ? 'Queued' : 
                      status === 'failed' ? 'Failed' : status}
                   </span>
                 </div>
