@@ -623,30 +623,31 @@ export async function createElasticsearchMcpServer(
             }
           }
 
-          // 视觉内容描述 (新增！)
-          if (source.visual_description || source.page_type) {
-            resultText += `\n🎨 页面视觉信息:\n`;
-            if (source.page_type) {
-              resultText += `   页面类型: ${source.page_type}\n`;
-            }
-            if (source.visual_description) {
-              const visualDesc = source.visual_description.length > 300
-                ? source.visual_description.substring(0, 300) + "..."
-                : source.visual_description;
-              resultText += `   视觉描述: ${visualDesc}\n`;
-            }
+          // 页面视觉信息
+          resultText += `\n🎨 页面视觉信息:\n`;
+          if (source.page_type) {
+            resultText += `   页面类型: ${source.page_type}\n`;
+          }
+          if (source.visual_description) {
+            const visualDesc = highlights.visual_description 
+              ? highlights.visual_description.join("\n   ") 
+              : (source.visual_description.length > 300 
+                  ? source.visual_description.substring(0, 300) + "..." 
+                  : source.visual_description);
+            resultText += `   视觉描述: ${visualDesc}\n`;
           }
 
-          // 匹配内容
-          resultText += `\n📝 匹配内容:\n`;
-          if (highlights.text && highlights.text.length > 0) {
-            resultText += highlights.text.join("\n...\n") + "\n";
-          } else if (source.text) {
-            const preview =
-              source.text.length > 300
+          // 文本内容
+          if (source.text) {
+            resultText += `\n📝 文本内容:\n`;
+            if (highlights.text && highlights.text.length > 0) {
+              resultText += highlights.text.join("\n...\n") + "\n";
+            } else {
+              const preview = source.text.length > 300
                 ? source.text.substring(0, 300) + "..."
                 : source.text;
-            resultText += preview + "\n";
+              resultText += preview + "\n";
+            }
           }
 
           // 返回结构化JSON (方便程序化处理)
@@ -1037,7 +1038,7 @@ export async function createElasticsearchMcpServer(
               ],
             },
           },
-          // 高亮显示 visual_description
+          // 高亮显示
           highlight: {
             fields: {
               visual_description: {
@@ -1052,17 +1053,33 @@ export async function createElasticsearchMcpServer(
                 pre_tags: ["<mark>"],
                 post_tags: ["</mark>"],
               },
+              text: {
+                fragment_size: 150,
+                number_of_fragments: 3,
+                pre_tags: ["<mark>"],
+                post_tags: ["</mark>"],
+              },
             },
           },
-          // 返回必要字段
+          // 返回必要字段（包含完整 MinIO 信息）
           _source: [
             "text",
             "visual_description",
             "page_type",
+            "document_name",
+            "drawing_number",
+            "project_name",
+            "page_number",
+            "total_pages",
             "metadata.filename",
             "metadata.page_number",
             "metadata.document_id",
-            "document_name",
+            "metadata.checksum",
+            "metadata.original_file_url",
+            "metadata.page_image_url",
+            "metadata.minio_bucket",
+            "metadata.minio_prefix",
+            "metadata.minio_base_url",
           ],
         };
 
@@ -1157,7 +1174,7 @@ export async function createElasticsearchMcpServer(
             }
           }
 
-          // 页面类型和视觉描述
+          // 页面视觉信息
           resultText += `\n🎨 页面视觉信息:\n`;
           if (source.page_type) {
             resultText += `   页面类型: ${source.page_type}\n`;
@@ -1171,13 +1188,17 @@ export async function createElasticsearchMcpServer(
             resultText += `   视觉描述: ${visualDesc}\n`;
           }
 
-          // 文本内容预览
+          // 文本内容
           if (source.text) {
-            resultText += `\n📝 内容预览:\n`;
-            const preview = source.text.length > 200 
-              ? source.text.substring(0, 200) + "..." 
-              : source.text;
-            resultText += preview + "\n";
+            resultText += `\n📝 文本内容:\n`;
+            if (highlights.text && highlights.text.length > 0) {
+              resultText += highlights.text.join("\n...\n") + "\n";
+            } else {
+              const preview = source.text.length > 300 
+                ? source.text.substring(0, 300) + "..." 
+                : source.text;
+              resultText += preview + "\n";
+            }
           }
 
           // 返回结构化JSON (方便程序化处理)
