@@ -30,6 +30,11 @@ uploads/
 *.sqlite3
 web/static/processed_docs/
 
+# User data directories
+tmp/
+temp/
+cache/
+
 # Test outputs (temporary)
 *_adaptive/
 *_adaptive_paddle/
