@@ -32,6 +32,201 @@ class VLMRefiner:
         with open(image_path, 'rb') as f:
             return base64.b64encode(f.read()).decode('utf-8')
     
+    def generate_cleaned_text(self, image_path: str, ocr_text: str, model: str = None) -> str:
+        """
+        第一次 VLM 调用：生成清理后的文本内容
+        
+        Args:
+            image_path: 图片路径
+            ocr_text: 原始 OCR 文本
+            model: 模型名称
+            
+        Returns:
+            清理后的纯文本字符串
+        """
+        print("🤖 [1/2] Calling VLM to clean OCR text...")
+        
+        image_base64 = self.encode_image_base64(image_path)
+        
+        prompt = f"""You are a text correction expert. Your task is to fix OCR errors and clean up the text.
+
+**Original OCR Text:**
+{ocr_text}
+
+**Your Task:**
+Fix OCR errors, correct garbled text, and clean up the content based on what you see in the image.
+
+Common OCR errors to fix:
+- Date formats: "4-AU9-25" → "4-Aug-25", "伛 SeP 3" → "15-Sep-25"
+- Letter/number confusion: "l0" → "10", "O" → "0"
+- Garbled characters: Remove or correct based on image context
+- Spacing issues: Fix abnormal spaces
+
+**CRITICAL:** 
+- Output ONLY the corrected text
+- NO explanations, NO JSON, NO formatting
+- Just the clean, corrected text content
+
+Output the corrected text:"""
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}},
+                    {"type": "text", "text": prompt}
+                ]
+            }
+        ]
+        
+        # 重试逻辑：最多 3 次
+        max_retries = 3
+        for retry in range(max_retries):
+            try:
+                if retry > 0:
+                    print(f"   🔄 Retry {retry}/{max_retries}...")
+                
+                response = self.client.chat.completions.create(
+                    model=model if model else "local-model",
+                    messages=messages,
+                    max_tokens=4096,
+                    temperature=0.1
+                )
+                
+                cleaned_text = response.choices[0].message.content.strip()
+                
+                if not cleaned_text:
+                    raise ValueError("VLM returned empty text")
+                
+                print(f"   ✓ Cleaned text generated ({len(cleaned_text)} chars)")
+                return cleaned_text
+                
+            except Exception as e:
+                if retry < max_retries - 1:
+                    print(f"   ⚠️  Error: {e} - will retry")
+                    continue
+                else:
+                    print(f"   ❌ All retries failed: {e}")
+                    print(f"   → Fallback: using original OCR text")
+                    return ocr_text
+        
+        # 不应该到达这里
+        return ocr_text
+    
+    def generate_visual_description(self, image_path: str, cleaned_text: str, model: str = None) -> str:
+        """
+        第二次 VLM 调用：生成视觉描述
+        
+        Args:
+            image_path: 图片路径
+            cleaned_text: 第一次调用生成的清理后文本
+            model: 模型名称
+            
+        Returns:
+            视觉描述的纯文本字符串（200-400字）
+        """
+        print("🤖 [2/2] Calling VLM to generate visual description...")
+        
+        image_base64 = self.encode_image_base64(image_path)
+        
+        prompt = f"""You are a technical document analyzer. Describe EVERYTHING you see in this document page.
+
+**Reference Text Content (for context):**
+{cleaned_text[:500]}...
+
+**Your Task:**
+Write a comprehensive 200-400 word description of what you SEE in the image.
+
+**Must Include:**
+1. **Layout & Structure:**
+   - Page orientation, columns, sections, organization
+   - Visual element positions and counts
+
+2. **Visual Elements:**
+   - Tables, diagrams, charts, photos, stamps, logos
+   - Count them: "2 tables", "1 circuit diagram", etc.
+
+3. **Technical Details (CRITICAL):**
+   - ALL part numbers: R1, C5, U2, IC3, J1, etc.
+   - Model codes and device IDs
+   - Specifications and measurements
+   - Reference designators and catalog numbers
+
+4. **Colors & Styling:**
+   - Dominant colors, highlights, color-coded elements
+   - Text hierarchy and styling
+
+5. **Text Content:**
+   - Visible titles, headings, labels, annotations
+   - Key identifiers and codes
+
+6. **Unique Features:**
+   - Watermarks, stamps (describe color and position)
+   - Handwritten notes, signatures
+   - Quality issues or damage
+
+**CRITICAL Requirements:**
+- Write 200-400 words as a SINGLE continuous paragraph
+- Include EVERY visible part number, model code, technical identifier
+- Be specific about positions, colors, and counts
+- This will be used for technical search queries like:
+  * "Find circuit diagram with IC U2"
+  * "Search for pages with red approval stamp"
+  * "Locate specifications for connector J1"
+
+**Output Format:**
+- ONLY the description text
+- NO JSON, NO formatting, NO sections
+- Just one continuous paragraph (200-400 words)
+
+Write the description:"""
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}},
+                    {"type": "text", "text": prompt}
+                ]
+            }
+        ]
+        
+        # 重试逻辑：最多 3 次
+        max_retries = 3
+        for retry in range(max_retries):
+            try:
+                if retry > 0:
+                    print(f"   🔄 Retry {retry}/{max_retries}...")
+                
+                response = self.client.chat.completions.create(
+                    model=model if model else "local-model",
+                    messages=messages,
+                    max_tokens=2048,
+                    temperature=0.2
+                )
+                
+                description = response.choices[0].message.content.strip()
+                
+                if not description:
+                    raise ValueError("VLM returned empty description")
+                
+                word_count = len(description.split())
+                print(f"   ✓ Visual description generated ({word_count} words)")
+                
+                return description
+                
+            except Exception as e:
+                if retry < max_retries - 1:
+                    print(f"   ⚠️  Error: {e} - will retry")
+                    continue
+                else:
+                    print(f"   ❌ All retries failed: {e}")
+                    print(f"   → Fallback: using basic description")
+                    return f"Document page containing text content. Unable to generate detailed visual analysis."
+        
+        # 不应该到达这里
+        return "Document page content analysis unavailable."
+    
     def build_prompt(self, ocr_data: Dict[str, Any], page_number: int = 1, region_ocr_data: List[Dict[str, Any]] = None) -> str:
         """构建提示词 - 针对每一页的理解和提取"""
         full_text = ocr_data.get('full_text', '')
@@ -170,157 +365,96 @@ Respond with ONLY the JSON, no additional text."""
                           model: str = None, page_number: int = 1, 
                           region_ocr_results: List[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        使用VLM模型和图片优化OCR结果
+        使用两次独立的 VLM 调用处理页面
         
         Args:
             image_path: 图片路径
             ocr_json_path: OCR结果JSON路径
-            model: 模型名称（None则使用LM Studio加载的模型）
-            page_number: 页码（用于prompt）
-            region_ocr_results: 阶段3的高分辨率区域OCR结果列表
+            model: 模型名称
+            page_number: 页码
+            region_ocr_results: 区域OCR结果（当前未使用）
             
         Returns:
-            精炼后的结构化数据
+            完整的结构化文档数据
         """
         print(f"\n📄 Processing Page {page_number}: {os.path.basename(image_path)}")
+        print("=" * 80)
         
-        # 读取OCR结果
+        # 读取 OCR 数据
         with open(ocr_json_path, 'r', encoding='utf-8') as f:
             ocr_data = json.load(f)
         
-        # 编码图片
-        print("🖼️  Encoding image...")
-        image_base64 = self.encode_image_base64(image_path)
+        ocr_text = ocr_data.get('full_text', '')
+        avg_confidence = ocr_data.get('average_confidence', 0.0)
+        text_blocks = ocr_data.get('text_blocks', [])
         
-        # 构建提示词（包含区域OCR数据）
-        if region_ocr_results:
-            print(f"📍 Including {len(region_ocr_results)} high-resolution region OCR results")
-        prompt = self.build_prompt(ocr_data, page_number, region_ocr_results)
+        # ============ 第一次调用：生成清理后的文本 ============
+        cleaned_text = self.generate_cleaned_text(image_path, ocr_text, model)
         
-        # 准备消息（支持vision）
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{image_base64}"
-                        }
-                    },
-                    {
-                        "type": "text",
-                        "text": prompt
-                    }
-                ]
-            }
-        ]
+        # ============ 第二次调用：生成视觉描述 ============
+        visual_description = self.generate_visual_description(image_path, cleaned_text, model)
         
-        # 重试逻辑：最多尝试 3 次
-        max_retries = 3
-        last_error = None
+        # ============ 在代码中构建完整的 JSON 结构 ============
+        print("\n🏗️  Building complete document structure...")
         
-        for retry in range(max_retries):
-            if retry > 0:
-                print(f"\n🔄 Retry {retry}/{max_retries}...")
-            else:
-                print("🤖 Calling VLM model...")
-                print("   (This may take a while for vision models...)")
+        # 从 visual_description 中简单提取 visual_elements（关键词匹配）
+        description_lower = visual_description.lower()
+        visual_elements = []
+        element_keywords = {
+            'table': ['table', '表格', 'grid'],
+            'diagram': ['diagram', '图', 'circuit', 'wiring', 'schematic'],
+            'stamp': ['stamp', '印章', 'seal', 'approval'],
+            'logo': ['logo', '标志'],
+            'photo': ['photo', '照片', 'image', 'picture'],
+            'chart': ['chart', '图表', 'graph'],
+            'signature': ['signature', '签名', 'signed'],
+            'annotation': ['annotation', '注释', 'handwritten', 'note'],
+            'border': ['border', '边框', 'frame'],
+            'watermark': ['watermark', '水印']
+        }
+        
+        for element, keywords in element_keywords.items():
+            if any(kw in description_lower for kw in keywords):
+                visual_elements.append(element)
+        
+        # 构建完整结构（只有两个字段来自 VLM，其他全部由代码填充）
+        complete_doc = {
+            "page_analysis": {
+                "page_number": page_number,  # 代码填充
+                "page_type": "mixed",  # 代码填充（固定值）
+                "visual_description": visual_description,  # ⭐ VLM 第二次调用
+                "visual_elements": visual_elements  # 代码提取
+            },
             
-            try:
-                # 调用模型（保持固定 temperature）
-                response = self.client.chat.completions.create(
-                    model=model if model else "local-model",
-                    messages=messages,
-                    max_tokens=4096,
-                    temperature=0.1,
-                )
-                
-                content = response.choices[0].message.content
-                print("✓ Model response received")
-                
-                # 解析JSON响应（增强鲁棒性）
-                json_start = content.find("{")
-                json_end = content.rfind("}") + 1
-                
-                if json_start != -1 and json_end > json_start:
-                    json_str = content[json_start:json_end]
-                    
-                    # 尝试多种解析策略
-                    for parse_attempt in range(3):
-                        try:
-                            if parse_attempt == 0:
-                                # 直接解析
-                                refined_data = json.loads(json_str)
-                            elif parse_attempt == 1:
-                                # 修复常见的转义问题：将单个反斜杠替换为双反斜杠（除了已经正确转义的）
-                                import re
-                                # 保护已经正确转义的字符
-                                fixed_json = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', json_str)
-                                refined_data = json.loads(fixed_json)
-                                print("   ℹ️  Fixed invalid escape sequences")
-                            elif parse_attempt == 2:
-                                # 使用strict=False模式
-                                refined_data = json.loads(json_str, strict=False)
-                                print("   ℹ️  Parsed with strict=False mode")
-                            
-                            # 解析成功！
-                            if retry > 0:
-                                print(f"✅ Successfully parsed JSON after {retry + 1} attempt(s)")
-                            return refined_data
-                            
-                        except json.JSONDecodeError as e:
-                            if parse_attempt < 2:
-                                continue  # 尝试下一个解析策略
-                            else:
-                                # 所有解析策略都失败
-                                error_msg = f"JSON parse failed: {e}"
-                                if retry < max_retries - 1:
-                                    print(f"⚠️  {error_msg} - will retry")
-                                    print(f"   Error position: line {e.lineno}, column {e.colno}")
-                                    last_error = ValueError(f"Failed to parse VLM JSON response: {e}")
-                                    break  # 跳出解析循环，进入下一次重试
-                                else:
-                                    # 这是最后一次尝试
-                                    print(f"❌ {error_msg} after {max_retries} attempts")
-                                    print(f"   Error position: line {e.lineno}, column {e.colno}")
-                                    print(f"   Problematic section: ...{json_str[max(0,e.pos-50):e.pos+50]}...")
-                                    raise ValueError(f"Failed to parse VLM JSON response after {max_retries} retries: {e}")
-                else:
-                    error_msg = "No valid JSON found in model response"
-                    if retry < max_retries - 1:
-                        print(f"⚠️  {error_msg} - will retry")
-                        last_error = ValueError(error_msg)
-                        continue  # 重试
-                    else:
-                        raise ValueError(f"{error_msg} after {max_retries} attempts")
-                
-            except ValueError as e:
-                # JSON 解析相关错误，继续重试
-                last_error = e
-                if retry == max_retries - 1:
-                    # 最后一次重试也失败了
-                    print(f"\n⚠️  VLM model failed after {max_retries} attempts: {e}")
-                    print("   Falling back to text-only refinement...")
-                    return self.refine_text_only(ocr_data, model)
-                continue
-                
-            except Exception as e:
-                # 其他错误（如网络、API错误）
-                if retry < max_retries - 1:
-                    print(f"⚠️  Error calling VLM model: {e} - will retry")
-                    last_error = e
-                    continue
-                else:
-                    # 最后一次重试也失败了
-                    print(f"\n⚠️  VLM model failed after {max_retries} attempts: {e}")
-                    print("   Falling back to text-only refinement...")
-                    return self.refine_text_only(ocr_data, model)
+            "extracted_content": {
+                "full_text_cleaned": cleaned_text,  # ⭐ VLM 第一次调用
+                "key_fields": [],  # 代码填充（留空）
+                "tables": []  # 代码填充（留空）
+            },
+            
+            "document_metadata": {
+                "document_id": None,  # 代码填充
+                "document_type": None,
+                "revision": None,
+                "title": None
+            },
+            
+            "domain_specific": None,  # 代码填充
+            
+            "keywords": [],  # 弃用，留空
+            
+            "confidence": avg_confidence,  # 从 OCR 数据获取
+            
+            "notes": []  # 弃用，留空
+        }
         
-        # 不应该到达这里，但以防万一
-        print(f"\n⚠️  All {max_retries} retry attempts exhausted")
-        print("   Falling back to text-only refinement...")
-        return self.refine_text_only(ocr_data, model)
+        print("✅ Document structure built successfully")
+        print(f"   - Cleaned text: {len(cleaned_text)} chars")
+        print(f"   - Visual description: {len(visual_description.split())} words")
+        print(f"   - Visual elements detected: {len(visual_elements)}")
+        print("=" * 80)
+        
+        return complete_doc
     
     def refine_text_only(self, ocr_data: Dict[str, Any], model: str = None) -> Dict[str, Any]:
         """
