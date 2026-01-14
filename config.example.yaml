@@ -166,7 +166,7 @@ processing:
   max_page_size_mb: 50  # 单页最大大小
   
   # 并发处理配置
-  max_workers: 2  # 降低并发数以避免 LM Studio 崩溃
+  max_workers: 1  # 🔴 单个VLM模型：页面级串行处理，避免 LM Studio 崩溃
   async_processing: true
 
 # 元器件提取配置（用于工业图纸）

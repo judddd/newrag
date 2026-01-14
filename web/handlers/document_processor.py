@@ -35,7 +35,7 @@ processed_folder.mkdir(parents=True, exist_ok=True)
 task_queue = queue.Queue()
 
 # Worker Thread Management
-WORKER_COUNT = 3  # Number of concurrent workers
+WORKER_COUNT = 1  # 🔴 单个VLM模型：文档级串行处理，避免并发调用 VLM
 workers = []
 
 def processing_worker():
