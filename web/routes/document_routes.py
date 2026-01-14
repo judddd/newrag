@@ -42,12 +42,24 @@ async def list_documents(
     offset: int = 0, 
     status: Optional[str] = None, 
     include_archives: bool = False,
+    search: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = 'desc',
     current_user: Optional[User] = Depends(get_current_user)
 ):
     """
-    List uploaded documents with permission filtering
+    List uploaded documents with permission filtering, search, and sorting
     
     Requires authentication. Returns only documents the user has permission to see.
+    
+    Args:
+        limit: Maximum number of documents to return
+        offset: Number of documents to skip
+        status: Filter by status
+        include_archives: Include ZIP archives in results
+        search: Search term for filename (case-insensitive)
+        sort_by: Sort field ('filename', 'uploaded_at', 'file_size', 'status')
+        sort_order: Sort order ('asc' or 'desc')
     """
     try:
         # 默认不显示 ZIP 压缩包本身，除非 include_archives=True
@@ -65,7 +77,10 @@ async def list_documents(
             exclude_file_types=exclude_types,
             user_id=user_id,
             org_id=org_id,
-            is_superuser=is_superuser
+            is_superuser=is_superuser,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order
         )
         return JSONResponse(content={
             "documents": [doc.to_dict() for doc in docs],

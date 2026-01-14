@@ -53,7 +53,15 @@ export interface DocumentListResponse {
 
 export const documentAPI = {
   // 获取文档列表
-  list: async (params?: { limit?: number; offset?: number; status?: string; organization_id?: number }) => {
+  list: async (params?: { 
+    limit?: number; 
+    offset?: number; 
+    status?: string; 
+    organization_id?: number;
+    search?: string;
+    sort_by?: string;
+    sort_order?: string;
+  }) => {
     const response = await apiClient.get<DocumentListResponse>('/documents', { params });
     return response.data;
   },

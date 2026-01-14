@@ -784,10 +784,13 @@ class DatabaseManager:
         exclude_file_types: Optional[List[str]] = None,
         user_id: Optional[int] = None,
         org_id: Optional[int] = None,
-        is_superuser: bool = False
+        is_superuser: bool = False,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = 'desc'
     ) -> Tuple[List[Document], int]:
         """
-        List documents with permission filtering
+        List documents with permission filtering, search, and sorting
         
         Args:
             limit: Maximum number of documents to return
@@ -797,6 +800,9 @@ class DatabaseManager:
             user_id: Current user ID for permission filtering
             org_id: Current user's organization ID
             is_superuser: Is user a superuser
+            search: Search term for filename (case-insensitive)
+            sort_by: Sort field ('filename', 'uploaded_at', 'file_size', 'status')
+            sort_order: Sort order ('asc' or 'desc')
         """
         session = self.get_session()
         try:
@@ -810,11 +816,37 @@ class DatabaseManager:
             if exclude_file_types:
                 query = query.filter(Document.file_type.notin_(exclude_file_types))
             
-            # Get total count
+            # Apply search filter (case-insensitive)
+            if search:
+                search_pattern = f"%{search}%"
+                query = query.filter(Document.filename.ilike(search_pattern))
+            
+            # Get total count before pagination
             total = query.count()
             
+            # Apply sorting
+            if sort_by:
+                if sort_by == 'filename':
+                    sort_field = Document.filename
+                elif sort_by == 'uploaded_at':
+                    sort_field = Document.uploaded_at
+                elif sort_by == 'file_size':
+                    sort_field = Document.file_size
+                elif sort_by == 'status':
+                    sort_field = Document.status
+                else:
+                    sort_field = Document.uploaded_at  # Default
+                
+                if sort_order == 'asc':
+                    query = query.order_by(sort_field.asc())
+                else:
+                    query = query.order_by(sort_field.desc())
+            else:
+                # Default: newest first
+                query = query.order_by(Document.uploaded_at.desc())
+            
             # Apply pagination
-            docs = query.order_by(Document.uploaded_at.desc()).limit(limit).offset(offset).all()
+            docs = query.limit(limit).offset(offset).all()
             
             return docs, total
         finally:

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Trash2, FileText, Calendar, Loader2, RefreshCw, Cloud, CheckSquare, Square, Shield, X } from 'lucide-react';
+import { Trash2, FileText, Calendar, Loader2, RefreshCw, Cloud, CheckSquare, Square, Shield, X, Search, ArrowUpDown } from 'lucide-react';
 import { documentAPI } from '../api/documents';
 import DocumentPermissionModal from '../components/DocumentPermissionModal';
 import { getAccessToken } from '../utils/auth';
@@ -13,6 +13,9 @@ export default function DocumentsPage() {
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [selectedDocForPermission, setSelectedDocForPermission] = useState<{ id: number; name: string } | null>(null);
   const [selectedOrgId, setSelectedOrgId] = useState<number | undefined>(undefined);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState('uploaded_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   // Fetch current user info
   const { data: currentUser } = useQuery({
@@ -39,11 +42,14 @@ export default function DocumentsPage() {
   });
 
   const { data, isLoading, isRefetching, refetch } = useQuery({
-    queryKey: ['documents', page, pageSize, selectedOrgId],
+    queryKey: ['documents', page, pageSize, selectedOrgId, searchTerm, sortBy, sortOrder],
     queryFn: () => documentAPI.list({ 
       limit: pageSize, 
       offset: (page - 1) * pageSize,
-      organization_id: selectedOrgId 
+      organization_id: selectedOrgId,
+      search: searchTerm || undefined,
+      sort_by: sortBy,
+      sort_order: sortOrder
     }),
   });
 
@@ -180,11 +186,62 @@ export default function DocumentsPage() {
         </div>
       </div>
 
-      {/* Filter Bar */}
-      {organizations && organizations.length > 1 && (
-        <div className="card bg-white dark:bg-slate-900 shadow-sm border border-slate-200 dark:border-slate-800 rounded-xl p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+      {/* Search and Filter Bar */}
+      <div className="card bg-white dark:bg-slate-900 shadow-sm border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+        <div className="flex flex-col gap-4">
+          {/* Search Bar */}
+          <div className="flex items-center gap-4">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={18} />
+              <input
+                type="text"
+                placeholder="搜索文档名称..."
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setPage(1); // Reset to first page on search
+                }}
+                className="w-full pl-10 pr-4 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => {
+                    setSearchTerm('');
+                    setPage(1);
+                  }}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <X size={18} />
+                </button>
+              )}
+            </div>
+
+            {/* Sort Controls */}
+            <div className="flex items-center gap-2">
+              <ArrowUpDown size={18} className="text-slate-400" />
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm"
+              >
+                <option value="uploaded_at">上传时间</option>
+                <option value="filename">文件名</option>
+                <option value="file_size">文件大小</option>
+                <option value="status">状态</option>
+              </select>
+              <button
+                onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                className="px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-sm"
+                title={sortOrder === 'asc' ? '升序' : '降序'}
+              >
+                {sortOrder === 'asc' ? '↑ 升序' : '↓ 降序'}
+              </button>
+            </div>
+          </div>
+
+          {/* Organization Filter (if multiple orgs) */}
+          {organizations && organizations.length > 1 && (
+            <div className="flex items-center gap-4 pt-2 border-t border-slate-200 dark:border-slate-700">
               <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
                 筛选机构:
               </label>
@@ -204,24 +261,41 @@ export default function DocumentsPage() {
                 ))}
               </select>
             </div>
-            {selectedOrgId && (
-              <div className="flex items-center gap-2">
-                <span className="text-xs px-2 py-1 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-md font-medium border border-indigo-100 dark:border-indigo-800">
-                  筛选中: {organizations.find(o => o.id === selectedOrgId)?.name}
-                </span>
-                <button
-                  onClick={() => {
-                    setSelectedOrgId(undefined);
-                    setPage(1);
-                  }}
-                  className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-                  title="清除筛选"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            )}
-          </div>
+          )}
+        </div>
+      </div>
+
+      {/* Active Filters Display */}
+      {(searchTerm || selectedOrgId) && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {searchTerm && (
+            <span className="text-xs px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-lg font-medium border border-indigo-100 dark:border-indigo-800 flex items-center gap-2">
+              搜索: {searchTerm}
+              <button
+                onClick={() => {
+                  setSearchTerm('');
+                  setPage(1);
+                }}
+                className="hover:text-indigo-800"
+              >
+                <X size={14} />
+              </button>
+            </span>
+          )}
+          {selectedOrgId && organizations && (
+            <span className="text-xs px-3 py-1.5 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 rounded-lg font-medium border border-purple-100 dark:border-purple-800 flex items-center gap-2">
+              机构: {organizations.find(o => o.id === selectedOrgId)?.name}
+              <button
+                onClick={() => {
+                  setSelectedOrgId(undefined);
+                  setPage(1);
+                }}
+                className="hover:text-purple-800"
+              >
+                <X size={14} />
+              </button>
+            </span>
+          )}
         </div>
       )}
 
