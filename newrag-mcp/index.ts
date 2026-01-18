@@ -640,13 +640,13 @@ export async function createElasticsearchMcpServer(
           // 文本内容
           if (source.text) {
             resultText += `\n📝 文本内容:\n`;
-            if (highlights.text && highlights.text.length > 0) {
-              resultText += highlights.text.join("\n...\n") + "\n";
+          if (highlights.text && highlights.text.length > 0) {
+            resultText += highlights.text.join("\n...\n") + "\n";
             } else {
               const preview = source.text.length > 300
                 ? source.text.substring(0, 300) + "..."
                 : source.text;
-              resultText += preview + "\n";
+            resultText += preview + "\n";
             }
           }
 
@@ -779,6 +779,27 @@ export async function createElasticsearchMcpServer(
               "metadata.filename": {},
             },
           },
+          // 返回完整字段信息
+          _source: [
+            "text",
+            "visual_description",
+            "page_type",
+            "document_name",
+            "drawing_number",
+            "project_name",
+            "metadata.filename",
+            "metadata.filepath",
+            "metadata.page_number",
+            "metadata.total_pages",
+            "metadata.document_id",
+            "metadata.checksum",
+            "metadata.original_file_url",
+            "metadata.page_image_url",
+            "metadata.minio_bucket",
+            "metadata.minio_prefix",
+            "metadata.minio_base_url",
+            "metadata.chunk_id",
+          ],
         };
 
         const result = await esClient.search({
@@ -793,31 +814,129 @@ export async function createElasticsearchMcpServer(
           const metadata = source.metadata || {};
 
           let resultText = `\n━━━ 结果 ${idx + 1} (分数: ${hit._score?.toFixed(3)}) ━━━\n`;
+          
+          // ES文档ID
           resultText += `🔑 ES文档ID: ${hit._id}\n`;
-          resultText += `📄 文件名: ${metadata.filename || "未知文件"}\n`;
-          resultText += `📃 页码: ${metadata.page_number || "N/A"}`;
-          if (metadata.total_pages) {
-            resultText += ` / ${metadata.total_pages}`;
-          }
-          resultText += `\n`;
           
-          // 添加视觉描述 (新增！)
-          if (source.page_type) {
-            resultText += `📊 页面类型: ${source.page_type}\n`;
+          // 文档基本信息
+          if (metadata.filename) {
+            resultText += `📄 文件名: ${
+              highlights["metadata.filename"]
+                ? highlights["metadata.filename"][0]
+                : metadata.filename
+            }\n`;
           }
-          if (source.visual_description) {
-            const visualDesc = source.visual_description.length > 200
-              ? source.visual_description.substring(0, 200) + "..."
-              : source.visual_description;
-            resultText += `🎨 视觉描述: ${visualDesc}\n`;
+          if (metadata.filepath) {
+            resultText += `📁 文件路径: ${metadata.filepath}\n`;
+          }
+          if (metadata.page_number) {
+            resultText += `📃 页码: ${metadata.page_number}`;
+            if (metadata.total_pages) {
+              resultText += ` / ${metadata.total_pages}`;
+            }
+            resultText += `\n`;
           }
           
+          // 文档标识信息
+          if (metadata.checksum) {
+            resultText += `#️⃣  Checksum: ${metadata.checksum.substring(0, 16)}...\n`;
+          }
+          if (metadata.document_id) {
+            resultText += `🆔 文档ID: ${metadata.document_id}\n`;
+          }
+          
+          // 文档名称和图纸编号
+          if (source.document_name) {
+            resultText += `🏷️  文档名称: ${source.document_name}\n`;
+          }
+          if (source.drawing_number) {
+            resultText += `🔢 图纸编号: ${source.drawing_number}\n`;
+          }
+          if (source.project_name) {
+            resultText += `🏗️  项目名称: ${source.project_name}\n`;
+          }
+          
+          // 原始文件URL
+          if (metadata.original_file_url) {
+            resultText += `\n📥 原始文件:\n`;
+            resultText += `   URL: ${metadata.original_file_url}\n`;
+            resultText += `   (可直接下载PDF/DOCX等原始文档)\n`;
+          }
+          
+          // MinIO图片资源
+          if (metadata.page_image_url) {
+            resultText += `\n📷 页面图片:\n`;
+            resultText += `   URL: ${metadata.page_image_url}\n`;
+          }
+          
+          // MinIO存储信息
+          if (metadata.minio_bucket || metadata.minio_prefix) {
+            resultText += `\n💾 MinIO存储:\n`;
+            if (metadata.minio_bucket) {
+              resultText += `   Bucket: ${metadata.minio_bucket}\n`;
+            }
+            if (metadata.minio_prefix) {
+              resultText += `   Prefix: ${metadata.minio_prefix}\n`;
+            }
+            if (metadata.minio_base_url) {
+              resultText += `   Base URL: ${metadata.minio_base_url}\n`;
+            }
+          }
+          
+          // 分块信息
+          if (metadata.chunk_id) {
+            resultText += `\n🧩 分块信息:\n`;
+            resultText += `   Chunk ID: ${metadata.chunk_id}\n`;
+          }
+          
+          // 页面视觉信息
+          if (source.page_type || source.visual_description) {
+            resultText += `\n🎨 页面视觉信息:\n`;
+            if (source.page_type) {
+              resultText += `   页面类型: ${source.page_type}\n`;
+            }
+            if (source.visual_description) {
+              const visualDesc = source.visual_description.length > 300
+                ? source.visual_description.substring(0, 300) + "..."
+                : source.visual_description;
+              resultText += `   视觉描述: ${visualDesc}\n`;
+            }
+          }
+          
+          // 文本内容
           resultText += `\n📝 匹配内容:\n`;
           if (highlights.text && highlights.text.length > 0) {
-            resultText += highlights.text[0] + "\n";
+            resultText += highlights.text.join("\n...\n") + "\n";
           } else if (source.text) {
-            resultText += source.text.substring(0, 200) + "...\n";
+            const preview = source.text.length > 300
+              ? source.text.substring(0, 300) + "..."
+              : source.text;
+            resultText += preview + "\n";
           }
+          
+          // 返回结构化JSON
+          resultText += `\n📋 结构化数据:\n`;
+          resultText += JSON.stringify({
+            es_id: hit._id,
+            score: hit._score,
+            document_id: metadata.document_id,
+            checksum: metadata.checksum,
+            filename: metadata.filename,
+            filepath: metadata.filepath,
+            page_number: metadata.page_number,
+            total_pages: metadata.total_pages,
+            page_type: source.page_type,
+            visual_description: source.visual_description,
+            original_file_url: metadata.original_file_url,
+            page_image_url: metadata.page_image_url,
+            minio_bucket: metadata.minio_bucket,
+            minio_prefix: metadata.minio_prefix,
+            minio_base_url: metadata.minio_base_url,
+            chunk_id: metadata.chunk_id,
+            document_name: source.document_name,
+            drawing_number: source.drawing_number,
+            project_name: source.project_name,
+          }, null, 2) + "\n";
           
           return resultText;
         });
@@ -879,6 +998,27 @@ export async function createElasticsearchMcpServer(
             },
           },
           sort: [{ "metadata.page_number": "asc" }],
+          // 返回完整字段信息
+          _source: [
+            "text",
+            "visual_description",
+            "page_type",
+            "document_name",
+            "drawing_number",
+            "project_name",
+            "metadata.filename",
+            "metadata.filepath",
+            "metadata.page_number",
+            "metadata.total_pages",
+            "metadata.document_id",
+            "metadata.checksum",
+            "metadata.original_file_url",
+            "metadata.page_image_url",
+            "metadata.minio_bucket",
+            "metadata.minio_prefix",
+            "metadata.minio_base_url",
+            "metadata.chunk_id",
+          ],
         };
 
         const result = await esClient.search({
@@ -897,38 +1037,119 @@ export async function createElasticsearchMcpServer(
           };
         }
 
-        const chunks = result.hits.hits.map((hit: any) => {
+        const chunks = result.hits.hits.map((hit: any, idx: number) => {
           const source = hit._source || {};
           const metadata = source.metadata || {};
           
           let chunkText = `\n━━━ 页码 ${metadata.page_number} ━━━\n`;
           
-          // 添加视觉信息 (新增！)
+          // ES文档ID
+          chunkText += `🔑 ES文档ID: ${hit._id}\n`;
+          
+          // 文档标识信息
+          if (metadata.checksum) {
+            chunkText += `#️⃣  Checksum: ${metadata.checksum.substring(0, 16)}...\n`;
+          }
+          
+          // 文档名称和图纸编号
+          if (source.document_name) {
+            chunkText += `🏷️  文档名称: ${source.document_name}\n`;
+          }
+          if (source.drawing_number) {
+            chunkText += `🔢 图纸编号: ${source.drawing_number}\n`;
+          }
+          if (source.project_name) {
+            chunkText += `🏗️  项目名称: ${source.project_name}\n`;
+          }
+          
+          // 原始文件URL
+          if (metadata.original_file_url) {
+            chunkText += `\n📥 原始文件:\n`;
+            chunkText += `   URL: ${metadata.original_file_url}\n`;
+          }
+          
+          // MinIO图片资源
+          if (metadata.page_image_url) {
+            chunkText += `\n📷 页面图片:\n`;
+            chunkText += `   URL: ${metadata.page_image_url}\n`;
+          }
+          
+          // MinIO存储信息
+          if (metadata.minio_bucket || metadata.minio_prefix) {
+            chunkText += `\n💾 MinIO存储:\n`;
+            if (metadata.minio_bucket) {
+              chunkText += `   Bucket: ${metadata.minio_bucket}\n`;
+            }
+            if (metadata.minio_prefix) {
+              chunkText += `   Prefix: ${metadata.minio_prefix}\n`;
+            }
+            if (metadata.minio_base_url) {
+              chunkText += `   Base URL: ${metadata.minio_base_url}\n`;
+            }
+          }
+          
+          // 页面视觉信息
           if (source.page_type || source.visual_description) {
             chunkText += `\n🎨 页面视觉信息:\n`;
             if (source.page_type) {
-              chunkText += `   类型: ${source.page_type}\n`;
+              chunkText += `   页面类型: ${source.page_type}\n`;
             }
             if (source.visual_description) {
               const visualDesc = source.visual_description.length > 300
                 ? source.visual_description.substring(0, 300) + "..."
                 : source.visual_description;
-              chunkText += `   描述: ${visualDesc}\n`;
+              chunkText += `   视觉描述: ${visualDesc}\n`;
             }
-            chunkText += `\n`;
           }
           
-          chunkText += `📝 页面内容:\n${source.text || ""}\n`;
+          // 文本内容
+          chunkText += `\n📝 页面内容:\n`;
+          const textPreview = source.text && source.text.length > 500
+            ? source.text.substring(0, 500) + "..."
+            : (source.text || "");
+          chunkText += textPreview + "\n";
+          
+          // 返回结构化JSON
+          chunkText += `\n📋 结构化数据:\n`;
+          chunkText += JSON.stringify({
+            es_id: hit._id,
+            document_id: metadata.document_id,
+            checksum: metadata.checksum,
+            filename: metadata.filename,
+            filepath: metadata.filepath,
+            page_number: metadata.page_number,
+            total_pages: metadata.total_pages,
+            page_type: source.page_type,
+            visual_description: source.visual_description,
+            original_file_url: metadata.original_file_url,
+            page_image_url: metadata.page_image_url,
+            minio_bucket: metadata.minio_bucket,
+            minio_prefix: metadata.minio_prefix,
+            minio_base_url: metadata.minio_base_url,
+            chunk_id: metadata.chunk_id,
+            document_name: source.document_name,
+            drawing_number: source.drawing_number,
+            project_name: source.project_name,
+          }, null, 2) + "\n";
           
           return chunkText;
         });
 
         const firstDoc: any = result.hits.hits[0]._source;
+        const firstMetadata = firstDoc.metadata || {};
+        
         return {
           content: [
             {
               type: "text" as const,
-              text: `📄 文档: ${firstDoc.metadata?.filename}\n总页数: ${result.hits.hits.length}\n\n${chunks.join("\n")}`,
+              text: `📄 文档完整内容获取 (get_document_chunks)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+文件名: ${firstMetadata.filename}
+文档ID: ${firstMetadata.document_id}
+总页数: ${result.hits.hits.length}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${chunks.join("\n\n")}`,
             },
           ],
         };
