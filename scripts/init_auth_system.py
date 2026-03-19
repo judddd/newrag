@@ -125,7 +125,7 @@ def init_auth_system():
     print("\n👤 Creating admin user...")
     admin_username = os.getenv('ADMIN_USERNAME', 'admin')
     admin_email = os.getenv('ADMIN_EMAIL', 'admin@example.com')
-    admin_password = os.getenv('ADMIN_PASSWORD', 'changeme123')
+    admin_password = os.getenv('ADMIN_PASSWORD', 'Admin123!@#')
     
     # Hash password (bcrypt has 72 byte limit)
     password_bytes = admin_password.encode('utf-8')[:72]

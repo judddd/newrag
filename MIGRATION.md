@@ -10,7 +10,7 @@
 python scripts/init_auth_system.py
 ```
 - 创建默认组织、角色、权限
-- 创建 admin 账户（admin / changeme123）
+- 创建 admin 账户（admin / Admin123!@#，可通过 ADMIN_PASSWORD 环境变量覆盖）
 - 自动迁移旧文档到 admin
 
 ### 2. 迁移文档到 admin 账户
