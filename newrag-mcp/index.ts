@@ -132,14 +132,44 @@ interface RagConfig {
   };
 }
 
+// 从 .env 文件加载环境变量（不覆盖已存在的）
+function loadDotEnv(): void {
+  const possiblePaths = [
+    path.join(__dirname, "../.env"),
+    path.join(process.cwd(), ".env"),
+    path.join(__dirname, "../../.env"),
+  ];
+
+  for (const envPath of possiblePaths) {
+    if (fs.existsSync(envPath)) {
+      try {
+        const content = fs.readFileSync(envPath, "utf8");
+        for (const line of content.split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith("#")) continue;
+          const eqIdx = trimmed.indexOf("=");
+          if (eqIdx === -1) continue;
+          const key = trimmed.substring(0, eqIdx).trim();
+          const value = trimmed.substring(eqIdx + 1).trim().replace(/^["']|["']$/g, "");
+          if (!process.env[key]) {
+            process.env[key] = value;
+          }
+        }
+        process.stderr.write(`✓ Loaded .env from: ${envPath}\n`);
+        return;
+      } catch (_) { /* ignore parse errors */ }
+    }
+  }
+}
+
 // 从config.yaml加载RAG配置
 function loadRagConfig(): RagConfig | null {
   try {
-    // 尝试从多个可能的路径加载配置
     const possiblePaths = [
       path.join(__dirname, "../config.yaml"),
       path.join(process.cwd(), "config.yaml"),
       path.join(__dirname, "../../config.yaml"),
+      path.join(__dirname, "../../../config.yaml"),
     ];
 
     for (const configPath of possiblePaths) {
@@ -1478,19 +1508,25 @@ ${formattedResults.join("\n\n")}`,
   return server;
 }
 
+// 先加载 .env 文件（使 JWT_SECRET 等环境变量在没有显式 export 时也能生效）
+loadDotEnv();
+
 // 加载配置
 const ragConfig = loadRagConfig();
 
-// 从 config.yaml 读取 JWT secret，如果没有则使用环境变量
+// JWT Secret 优先级: 环境变量(.env) > config.yaml > 统一默认值
+// 重新读取环境变量（loadDotEnv 可能已设置）
+if (!JWT_SECRET && process.env.JWT_SECRET) {
+  JWT_SECRET = process.env.JWT_SECRET;
+  process.stderr.write(`✓ JWT_SECRET loaded from environment variable / .env\n`);
+}
 if (!JWT_SECRET && ragConfig?.security?.jwt_secret) {
   JWT_SECRET = ragConfig.security.jwt_secret;
   process.stderr.write(`✓ JWT_SECRET loaded from config.yaml (${JWT_SECRET.substring(0, 20)}...)\n`);
 }
 if (!JWT_SECRET) {
-  JWT_SECRET = "your-super-secret-key-please-change-this-in-production";
+  JWT_SECRET = "kJ9mP2vX8nQ4wR7tY3zL6hF5dS1aG0bN8cM4xV9pK2uE7iW3oA6qT5rH8jL1mN4pS9v";
   process.stderr.write("⚠️  Warning: Using default JWT_SECRET. Set JWT_SECRET env var or security.jwt_secret in config.yaml\n");
-} else if (process.env.JWT_SECRET) {
-  process.stderr.write(`✓ JWT_SECRET loaded from environment variable\n`);
 }
 
 const config: ElasticsearchConfig = {

@@ -13,6 +13,15 @@ if [ ! -f "../config.yaml" ]; then
     echo ""
 fi
 
+# 自动从父目录 .env 加载 JWT_SECRET（如果未设置）
+if [ -z "$JWT_SECRET" ] && [ -f "../.env" ]; then
+    JWT_VAL=$(grep -E '^JWT_SECRET=' "../.env" | cut -d'=' -f2-)
+    if [ -n "$JWT_VAL" ]; then
+        export JWT_SECRET="$JWT_VAL"
+        echo "✓ JWT_SECRET loaded from ../.env"
+    fi
+fi
+
 # 启动服务器
 echo ""
 echo "Starting server..."

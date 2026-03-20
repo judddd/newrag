@@ -17,12 +17,14 @@ def load_config():
             config = yaml.safe_load(f)
             web_conf = config.get("web", {})
             mcp_conf = config.get("mcp", {})
+            security_conf = config.get("security", {})
             return {
                 "backend_host": web_conf.get("host", "0.0.0.0"),
                 "backend_port": web_conf.get("port", 8080),
                 "frontend_port": web_conf.get("frontend_port", 3000),
                 "mcp_host": mcp_conf.get("host", "0.0.0.0"),
-                "mcp_port": mcp_conf.get("port", 3001)
+                "mcp_port": mcp_conf.get("port", 3001),
+                "jwt_secret": security_conf.get("jwt_secret", ""),
             }
     except Exception as e:
         print(f"⚠️  读取 config.yaml 失败，使用默认配置: {e}")
@@ -31,7 +33,8 @@ def load_config():
             "backend_port": 8080,
             "frontend_port": 3000,
             "mcp_host": "0.0.0.0",
-            "mcp_port": 3001
+            "mcp_port": 3001,
+            "jwt_secret": "",
         }
 
 def print_ready_message(conf):
@@ -75,6 +78,10 @@ def main():
     
     mcp_env["MCP_HTTP_PORT"] = str(conf["mcp_port"])
     mcp_env["MCP_HTTP_HOST"] = mcp_bind_host
+    # 确保 MCP 拿到和后端一致的 JWT Secret
+    jwt_secret = os.getenv("JWT_SECRET") or conf.get("jwt_secret", "")
+    if jwt_secret:
+        mcp_env["JWT_SECRET"] = jwt_secret
     
     # 检查是否需要安装依赖或构建
     if not os.path.exists(os.path.join(mcp_dir, "node_modules")):

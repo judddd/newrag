@@ -38,7 +38,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         
         # Get JWT configuration
         security_config = config.security_config
-        self.jwt_secret = security_config.get('jwt_secret', 'dev-secret-key')
+        self.jwt_secret = security_config.get('jwt_secret', 'kJ9mP2vX8nQ4wR7tY3zL6hF5dS1aG0bN8cM4xV9pK2uE7iW3oA6qT5rH8jL1mN4pS9v')
         self.jwt_algorithm = security_config.get('jwt_algorithm', 'HS256')
         self.auth_enabled = security_config.get('auth', {}).get('enabled', False)
         

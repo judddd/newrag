@@ -12,6 +12,9 @@ export ES_USERNAME="elastic"
 export ES_PASSWORD="1234!"
 export NODE_TLS_REJECT_UNAUTHORIZED="0"
 
+# JWT Configuration (must match backend's jwt_secret in config.yaml or .env)
+# export JWT_SECRET="your-jwt-secret-here"
+
 # MCP Transport Configuration
 export MCP_TRANSPORT="http"
 export MCP_HTTP_PORT="3001"

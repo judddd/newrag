@@ -255,7 +255,7 @@ security:
     requests_per_minute: 60
   
   # JWT 配置
-  jwt_secret: "your-secret-key-min-32-chars-change-in-production"  # 通过环境变量 JWT_SECRET 覆盖
+  jwt_secret: "kJ9mP2vX8nQ4wR7tY3zL6hF5dS1aG0bN8cM4xV9pK2uE7iW3oA6qT5rH8jL1mN4pS9v"  # 通过环境变量 JWT_SECRET 覆盖
   jwt_algorithm: "HS256"
   jwt_access_token_expire_minutes: 60
   jwt_refresh_token_expire_days: 30
